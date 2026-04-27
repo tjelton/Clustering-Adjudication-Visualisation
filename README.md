@@ -79,7 +79,7 @@ python clustering_comparison.py annotations_alice.csv annotations_bob.csv --use-
 **Three annotators:**
 
 ```bash
-python clustering_comparison.py annotations_alice.csv annotations_bob.csv annotations_carol.csv --use-keys -o three_way.html
+python clustering_comparison.py annotations_alice.csv annotations_bob.csv annotations_carol.csv --use-keys -o three_person_comparison.html
 ```
 
 ### Checking compatibility

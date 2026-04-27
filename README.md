@@ -60,6 +60,7 @@ python clustering_comparison.py <file1.csv> <file2.csv> [file3.csv] [options]
 | `file3` | Path to a third annotation CSV (optional — enables three-annotator mode) |
 | `-o`, `--output` | Output HTML file path (default: `comparison.html`) |
 | `--use-keys` | Match quotes by the numeric key `(N)` at the end of each quote instead of by exact text |
+| `--check` | Validate that the CSV files are compatible without generating any HTML |
 
 ### Examples
 
@@ -79,6 +80,19 @@ python clustering_comparison.py annotations_alice.csv annotations_bob.csv --use-
 
 ```bash
 python clustering_comparison.py annotations_alice.csv annotations_bob.csv annotations_carol.csv --use-keys -o three_way.html
+```
+
+### Checking compatibility
+
+The `--check` flag validates that files are compatible without producing any output HTML. It checks:
+
+1. That each file has the required `Code_Name` and `Quote` columns.
+2. That all quotes/keys are valid and unique within each file (when `--use-keys` is set, every quote must end with a `(N)` key).
+3. That all files share the same set of quotes or keys.
+
+```bash
+python clustering_comparison.py file1.csv file2.csv --check
+python clustering_comparison.py file1.csv file2.csv file3.csv --use-keys --check
 ```
 
 ## Matching Modes

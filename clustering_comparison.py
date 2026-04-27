@@ -61,25 +61,15 @@ def parse_args():
 # ---------------------------------------------------------------------------
 
 def read_csv(filepath):
-    """Read a CSV and return list of dicts with Code_Name and Quote.
-
-    Splits only on the first comma so that commas inside quotes are handled
-    without needing properly-quoted CSV fields.
-    """
+    """Read a CSV and return list of dicts with Code_Name and Quote."""
+    import csv as _csv
     rows = []
-    with open(filepath, encoding="utf-8") as f:
-        f.readline()  # skip header
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            parts = line.split(",", 1)
-            if len(parts) < 2:
-                continue
-            quote = parts[1].strip()
-            if quote.startswith('"') and quote.endswith('"'):
-                quote = quote[1:-1]
-            rows.append({"Code_Name": parts[0].strip(), "Quote": quote})
+    with open(filepath, encoding="utf-8", newline="") as f:
+        reader = _csv.DictReader(f)
+        for row in reader:
+            code = row.get("Code_Name", "").strip()
+            quote = row.get("Quote", "").strip()
+            rows.append({"Code_Name": code, "Quote": quote})
     return rows
 
 
@@ -104,7 +94,7 @@ KEY_PATTERN = re.compile(r"\((\d+)\)\s*$")
 
 
 def extract_key(quote):
-    m = KEY_PATTERN.search(quote)
+    m = KEY_PATTERN.search(quote.rstrip('"\''))
     return int(m.group(1)) if m else None
 
 

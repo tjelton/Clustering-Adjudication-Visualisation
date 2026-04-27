@@ -48,6 +48,11 @@ def parse_args():
         action="store_true",
         help="Match quotes by numeric key (N) at end of quote instead of full text",
     )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Validate that the CSV files are compatible without generating HTML",
+    )
     return parser.parse_args()
 
 
@@ -435,6 +440,109 @@ var _n = {n_views};
 
 
 # ---------------------------------------------------------------------------
+# Compatibility check
+# ---------------------------------------------------------------------------
+
+def check_compatibility(files, all_rows, use_keys):
+    """Validate CSV files are compatible and print a clear pass/fail report."""
+    ok = True
+
+    # Column check
+    print("Checking columns...")
+    for filepath, rows in zip(files, all_rows):
+        missing = [c for c in ("Code_Name", "Quote") if c not in rows[0]]
+        if missing:
+            print(f"  FAIL  '{filepath}' is missing column(s): {missing}")
+            ok = False
+        else:
+            print(f"  OK    '{filepath}'")
+
+    if not ok:
+        print("\nColumn check failed — cannot proceed with quote/key matching.")
+        sys.exit(1)
+
+    # Key/quote check
+    if use_keys:
+        print("\nChecking numeric keys (--use-keys)...")
+        key_sets = []
+        for filepath, rows in zip(files, all_rows):
+            valid = True
+            key_map = {}
+            for i, row in enumerate(rows):
+                key = extract_key(row["Quote"])
+                if key is None:
+                    print(
+                        f"  FAIL  '{filepath}' row {i + 2} has no key: {row['Quote']!r}"
+                    )
+                    valid = False
+                    ok = False
+                elif key in key_map:
+                    print(f"  FAIL  '{filepath}' has duplicate key ({key})")
+                    valid = False
+                    ok = False
+                else:
+                    key_map[key] = True
+            if valid:
+                print(f"  OK    '{filepath}' — {len(key_map)} keys")
+            key_sets.append(set(key_map.keys()))
+
+        if len(key_sets) >= 2:
+            print("\nChecking key sets match across files...")
+            reference = key_sets[0]
+            for i in range(1, len(key_sets)):
+                only_ref = reference - key_sets[i]
+                only_other = key_sets[i] - reference
+                if only_ref or only_other:
+                    ok = False
+                    if only_ref:
+                        print(
+                            f"  FAIL  Keys in '{files[0]}' not in '{files[i]}': "
+                            f"{sorted(only_ref)[:10]}"
+                        )
+                    if only_other:
+                        print(
+                            f"  FAIL  Keys in '{files[i]}' not in '{files[0]}': "
+                            f"{sorted(only_other)[:10]}"
+                        )
+                else:
+                    print(f"  OK    '{files[0]}' and '{files[i]}' share the same keys")
+    else:
+        print("\nChecking quotes match across files...")
+        quote_sets = [
+            {row["Quote"].strip() for row in rows} for rows in all_rows
+        ]
+        reference = quote_sets[0]
+        for i in range(1, len(quote_sets)):
+            only_ref = reference - quote_sets[i]
+            only_other = quote_sets[i] - reference
+            if only_ref or only_other:
+                ok = False
+                if only_ref:
+                    print(
+                        f"  FAIL  {len(only_ref)} quote(s) in '{files[0]}' "
+                        f"not in '{files[i]}':"
+                    )
+                    for q in list(only_ref)[:3]:
+                        print(f"          - {q!r}")
+                if only_other:
+                    print(
+                        f"  FAIL  {len(only_other)} quote(s) in '{files[i]}' "
+                        f"not in '{files[0]}':"
+                    )
+                    for q in list(only_other)[:3]:
+                        print(f"          - {q!r}")
+            else:
+                print(f"  OK    '{files[0]}' and '{files[i]}' share the same quotes")
+
+    print()
+    if ok:
+        print("All checks passed — files are compatible.")
+    else:
+        print("Compatibility check failed.")
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -450,6 +558,10 @@ def main():
 
     for rows, filepath in zip(all_rows, files):
         validate_columns(rows, filepath)
+
+    if args.check:
+        check_compatibility(files, all_rows, args.use_keys)
+        return
 
     # Validate that all files have the same quotes/keys
     validate_matching_pair(all_rows[0], all_rows[1], files[0], files[1], args.use_keys)

@@ -12,6 +12,7 @@ Given two CSV files, the tool produces an HTML page where:
 - Each quote is **colour-coded** by **Annotator 2's** cluster assignment.
 - The right column shows **Annotator 2's** cluster name for each quote.
 - Singleton clusters (only one quote) are rendered in **black** and wrapped in square brackets.
+- Cluster names are **underlined** when that cluster is split across multiple base-annotator groups (i.e. not all of its quotes appear in the current group). No underline means every quote of that colour is contained within the current group.
 - A **Swap Researchers** button flips which annotator's grouping is displayed.
 
 When Annotator 1's clusters are internally consistent with Annotator 2's, quotes within a group share the same colour. Mixed colours highlight disagreements.
@@ -24,9 +25,10 @@ Given three CSV files, the tool produces an HTML page where:
 - Two content columns display the same quotes side by side:
   - **Left column** — colour-coded by the second annotator, with their cluster name alongside.
   - **Right column** — colour-coded by the third annotator, with their cluster name alongside.
+- Cluster names are **underlined** when that cluster is split across multiple base-annotator groups. No underline means all quotes of that colour are contained within the current group.
 - A **Cycle Base** button (labelled with the current base annotator's name) rotates which annotator acts as the base.
 
-Because the same quote text appears in both content columns, using browser Ctrl+F to search for a quote would highlight it in both columns simultaneously. To make each instance uniquely searchable, a suffix is appended to every displayed quote: `_N`, where N is the position (1, 2, or 3) of the annotator whose colour coding is shown in that column. For example, if file 2 is colour-coding the left column and file 3 the right, the same quote will appear as `...quote text..._2` on the left and `...quote text..._3` on the right. Searching `_2` will find only the left-column instances.
+Because the same cluster names may appear in both content columns, a suffix `_N` is appended to each displayed cluster name, where N is the position (1, 2, or 3) of the annotator whose colour coding is shown in that column. For example, if file 2 is colour-coding the left column and file 3 the right, a cluster name `a` will appear as `a_2` on the left and `a_3` on the right. Searching `_2` will find only the left-column instances.
 
 ## Requirements
 

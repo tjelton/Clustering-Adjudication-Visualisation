@@ -188,20 +188,33 @@ def build_view(rows_base, lookup_other, cmap_other, use_keys):
     for row in rows_base:
         clusters.setdefault(row["Code_Name"], []).append(row)
 
+    # Reverse map: other_code -> set of keys that belong to that cluster
+    other_code_keys = {}
+    for row in rows_base:
+        k = extract_key(row["Quote"]) if use_keys else row["Quote"].strip()
+        oc = lookup_other[k]
+        other_code_keys.setdefault(oc, set()).add(k)
+
     left_parts, right_parts = [], []
     sep = '<br><br><hr style="width: 100%; border: 1px solid black;"><br><br>'
 
     for cluster_rows in clusters.values():
+        base_keys = set()
+        for row in cluster_rows:
+            base_keys.add(extract_key(row["Quote"]) if use_keys else row["Quote"].strip())
+
         for row in cluster_rows:
             quote = row["Quote"]
             k = extract_key(quote) if use_keys else quote.strip()
             other_code = lookup_other[k]
             colour = cmap_other.get(other_code) or "#000000"
             display = ("[ " + quote + " ]") if cmap_other.get(other_code) is None else quote
+            fully_contained = other_code_keys[other_code].issubset(base_keys)
+            underline = "" if fully_contained else " text-decoration: underline;"
 
             left_parts.append(f'<p style="color: {colour};">{display}</p>')
             right_parts.append(
-                f'<p style="color: {colour}; font-size: 11px;"><em>{other_code}</em></p>'
+                f'<p style="color: {colour}; font-size: 11px;{underline}"><em>{other_code}</em></p>'
             )
         left_parts.append(sep)
         right_parts.append(sep)
@@ -268,10 +281,23 @@ def build_three_view(rows_base, lookup_left, cmap_left, lookup_right, cmap_right
     for row in rows_base:
         clusters.setdefault(row["Code_Name"], []).append(row)
 
+    # Reverse maps: cluster_code -> set of keys for left and right annotators
+    left_code_keys, right_code_keys = {}, {}
+    for row in rows_base:
+        k = extract_key(row["Quote"]) if use_keys else row["Quote"].strip()
+        lc = lookup_left[k]
+        rc = lookup_right[k]
+        left_code_keys.setdefault(lc, set()).add(k)
+        right_code_keys.setdefault(rc, set()).add(k)
+
     row_htmls = []
     sep = '<br><hr style="width:100%; border:1px solid black;"><br>'
 
     for cluster_rows in clusters.values():
+        base_keys = set()
+        for row in cluster_rows:
+            base_keys.add(extract_key(row["Quote"]) if use_keys else row["Quote"].strip())
+
         for row in cluster_rows:
             quote = row["Quote"]
             k = extract_key(quote) if use_keys else quote.strip()
@@ -282,15 +308,21 @@ def build_three_view(rows_base, lookup_left, cmap_left, lookup_right, cmap_right
             rcolour = cmap_right.get(rcode) or "#000000"
             ldisplay = ("[ " + quote + " ]") if cmap_left.get(lcode) is None else quote
             rdisplay = ("[ " + quote + " ]") if cmap_right.get(rcode) is None else quote
-            ldisplay += f"_{left_suffix}"
-            rdisplay += f"_{right_suffix}"
+
+            l_contained = left_code_keys[lcode].issubset(base_keys)
+            r_contained = right_code_keys[rcode].issubset(base_keys)
+            l_underline = "" if l_contained else " text-decoration: underline;"
+            r_underline = "" if r_contained else " text-decoration: underline;"
+
+            lcode_display = f"{lcode}_{left_suffix}"
+            rcode_display = f"{rcode}_{right_suffix}"
 
             row_htmls.append(
                 f'<div class="container">'
                 f'<div class="quote_left" style="color:{lcolour};">{ldisplay}</div>'
-                f'<div class="code_left" style="color:{lcolour};"><em>{lcode}</em></div>'
+                f'<div class="code_left" style="color:{lcolour};{l_underline}"><em>{lcode_display}</em></div>'
                 f'<div class="quote_right" style="color:{rcolour};">{rdisplay}</div>'
-                f'<div class="code_right" style="color:{rcolour};"><em>{rcode}</em></div>'
+                f'<div class="code_right" style="color:{rcolour};{r_underline}"><em>{rcode_display}</em></div>'
                 f'</div>'
             )
         row_htmls.append(sep)
@@ -391,7 +423,10 @@ def _write_explainer(f, n):
             "On the left, quotes are grouped by Annotator 1's clusters.<br><br>"
             "Colour coding reflects Annotator 2's clusters. Singleton clusters are black "
             "and wrapped in square brackets.<br><br>"
-            "The right column shows Annotator 2's cluster name for each quote.<br><br>"
+            "The right column shows Annotator 2's cluster name for each quote. "
+            "An <u>underlined</u> cluster name means that cluster is split across "
+            "multiple groups — some of its quotes appear elsewhere. No underline means "
+            "all quotes of that cluster are contained within the current group.<br><br>"
             "Use <b>Swap Researchers</b> to flip which annotator's grouping is shown."
         )
     else:
@@ -400,6 +435,9 @@ def _write_explainer(f, n):
             "The left content column is colour-coded by the second annotator; "
             "the right content column by the third. Singleton clusters are black and "
             "wrapped in square brackets.<br><br>"
+            "An <u>underlined</u> cluster name means that cluster is split across "
+            "multiple groups — some of its quotes appear elsewhere. No underline means "
+            "all quotes of that cluster are contained within the current group.<br><br>"
             "Use <b>Cycle Base</b> to rotate which annotator acts as the base."
         )
     f.write(

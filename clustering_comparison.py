@@ -21,6 +21,7 @@ Usage:
 
 import argparse
 import os
+import random
 import re
 import sys
 from collections import Counter, OrderedDict
@@ -171,7 +172,8 @@ def build_colour_map(rows):
     counts = Counter(row["Code_Name"] for row in rows)
     multi = [name for name, c in counts.items() if c > 1]
     palette = sns.color_palette("husl", len(multi)).as_hex()
-    colour_map = {name: palette.pop() for name in multi}
+    random.shuffle(palette)
+    colour_map = {name: palette[i] for i, name in enumerate(multi)}
     for name, c in counts.items():
         if c == 1:
             colour_map[name] = None

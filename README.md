@@ -30,10 +30,45 @@ Given three CSV files, the tool produces an HTML page where:
 
 Because the same cluster names may appear in both content columns, a suffix `_N` is appended to each displayed cluster name, where N is the position (1, 2, or 3) of the annotator whose colour coding is shown in that column. For example, if file 2 is colour-coding the left column and file 3 the right, a cluster name `a` will appear as `a_2` on the left and `a_3` on the right. Searching `_2` will find only the left-column instances.
 
+### Live adjudication (two annotators)
+
+Instead of only *viewing* disagreements, you can resolve them interactively in the
+browser with `--live-adjudication`. This mode takes a single **combined CSV** (produced
+by `--combine`, see below) and launches a small local server — no extra dependencies,
+just Python's standard library — then opens the GUI in your browser.
+
+- Sentences are grouped by **R1** (Researcher 1, left column) and colour-coded by
+  **R2** (Researcher 2, right column), with the sentence in the middle.
+- The tool splits the work into **pages** — one per set of clusters that are entangled
+  between the two annotators (a connected component of shared clusters). Pages where R1
+  and R2 fully agree are skipped so you only see genuine conflicts.
+- A **table** at the bottom (Sentence, R1, R2, R1_Original, R2_Original) mirrors the
+  current page, sorted by R1 then Sentence.
+
+**Adjudication controls** (right-click):
+
+| Right-click on | Menu | Effect |
+|---|---|---|
+| An **R2** name | *Reassign R2* | Change that sentence's R2 cluster. The dropdown lists the most relevant clusters first (those sharing the sentence's R1 group, then those co-occurring with the current R2 cluster elsewhere), a divider, then all remaining R2 clusters alphabetically. |
+| An **R1** name | *Reassign R1* | Change that sentence's R1 cluster, with a similarly-ranked shortlist. |
+| A **sentence** | *Make new Cluster* | Move the sentence into a brand-new cluster created directly beneath the current one (`New - ` is prepended to both its R1 and R2 names until unique). |
+| An **R1 or R2** name | *Rename All…* | Rename every instance of that cluster name at once. |
+
+Cells in the table (except Sentence, R1_Original and R2_Original) can also be edited
+directly. All edits stay **pending** — the right-click controls lock — until you press
+**Submit change** (which re-renders the view and saves the adjudicated CSV to disk) or
+**Discard change** (which reverts). Move between pages with **Prev/Next**.
+
+The output is a single adjudicated CSV (`Sentence, R1, R2, R1_Original, R2_Original`)
+written on every submitted change, so nothing is lost if the browser closes. Re-running
+`--live-adjudication` on that output file resumes where you left off.
+
 ## Requirements
 
 - Python 3.7+
-- [seaborn](https://seaborn.pydata.org/) (`pip install seaborn`)
+- [seaborn](https://seaborn.pydata.org/) (`pip install seaborn`) — only required for
+  generating the static HTML comparisons. `--combine` and `--live-adjudication` use only
+  the standard library.
 
 ## CSV Format
 
@@ -63,6 +98,9 @@ python clustering_comparison.py <file1.csv> <file2.csv> [file3.csv] [options]
 | `-o`, `--output` | Output HTML file path (default: `comparison.html`) |
 | `--use-keys` | Match quotes by the numeric key `(N)` at the end of each quote instead of by exact text |
 | `--check` | Validate that the CSV files are compatible without generating any HTML |
+| `--combine` | Combine two annotation CSVs into a single adjudication CSV (`Sentence, Annotator_1_Code, Annotator_2_Code`) written to `--output`. Requires exactly 2 files. |
+| `--live-adjudication` | Launch the interactive two-annotator adjudication GUI. Takes a single combined CSV (from `--combine`); writes the adjudicated CSV to `--output`. |
+| `--port` | Port for the `--live-adjudication` local server (default: `8000`). |
 
 ### Examples
 
@@ -83,6 +121,21 @@ python clustering_comparison.py annotations_alice.csv annotations_bob.csv --use-
 ```bash
 python clustering_comparison.py annotations_alice.csv annotations_bob.csv annotations_carol.csv --use-keys -o three_person_comparison.html
 ```
+
+### Live adjudication (two annotators)
+
+First combine the two annotators' files into one CSV, then adjudicate it:
+
+```bash
+# 1. Combine into a single adjudication CSV
+python clustering_comparison.py Example_Data/Kevin_annotations.csv Example_Data/Michael_annotations.csv --use-keys --combine -o combined.csv
+
+# 2. Launch the interactive adjudication GUI (opens in your browser)
+python clustering_comparison.py combined.csv --live-adjudication -o adjudicated.csv
+```
+
+If `-o` is omitted, `--combine` defaults to `combined.csv` and `--live-adjudication`
+defaults to `adjudicated.csv`. Press `Ctrl+C` in the terminal to stop the server.
 
 ### Checking compatibility
 
@@ -125,4 +178,13 @@ python clustering_comparison.py Example_Data/Kevin_annotations.csv Example_Data/
 
 # Three annotators
 python clustering_comparison.py Example_Data/Kevin_annotations.csv Example_Data/Michael_annotations.csv Example_Data/Dwight_annotations.csv --use-keys -o example_three.html
+```
+
+`Researcher1_annotations.csv` and `Researcher2_annotations.csv` are a small
+two-annotator set for trying out live adjudication. They match by exact quote text (no
+`--use-keys` needed) and split into two conflict pages:
+
+```bash
+python clustering_comparison.py Example_Data/Researcher1_annotations.csv Example_Data/Researcher2_annotations.csv --combine -o combined.csv
+python clustering_comparison.py combined.csv --live-adjudication -o adjudicated.csv
 ```

@@ -63,8 +63,10 @@ def parse_args():
         dest="live_adjudication",
         action="store_true",
         help="Launch the interactive two-annotator adjudication GUI in a browser. "
-        "Takes a single combined CSV (see --combine) and writes the adjudicated CSV "
-        "to --output on each submitted change.",
+        "Takes a single combined CSV (see --combine) or a previously adjudicated "
+        "CSV to resume where you left off, and writes the adjudicated CSV to "
+        "--output on each change. When resuming and -o is omitted, changes are "
+        "saved back to the input file.",
     )
     parser.add_argument(
         "--port",
@@ -639,6 +641,7 @@ _ADJUDICATION_TEMPLATE = r"""<!DOCTYPE html>
            border-radius: 5px; background: #f7f7f7; }
   button:disabled { opacity: 0.4; cursor: not-allowed; }
   #page-label { font-weight: 600; }
+  .toolbar .spacer { flex: 1; }
   .banner { display: none; margin: 0; padding: 8px 20px; background: #fff4d6;
             border-bottom: 1px solid #e6c964; color: #7a5c00; font-size: 13px; }
   .section-title { font-weight: 600; padding: 14px 20px 4px 20px; font-size: 14px; }
@@ -668,10 +671,11 @@ _ADJUDICATION_TEMPLATE = r"""<!DOCTYPE html>
               border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,0.2); z-index: 1000;
               min-width: 170px; max-height: 60vh; overflow-y: auto; padding: 4px 0;
               font-size: 13px; }
-  .ctx-title { font-weight: 700; padding: 6px 12px; color: #333; }
   .ctx-item { padding: 5px 14px; cursor: pointer; white-space: nowrap; }
   .ctx-item:hover { background: #e8f0fe; }
   .ctx-item.ctx-action { color: #1a5fb4; }
+  .ctx-item.ctx-sub::after { content: '\25B8'; float: right; margin-left: 14px; color: #888; }
+  .ctx-item.ctx-sub.open { background: #e8f0fe; }
   .ctx-div { border-top: 1px solid #ddd; margin: 4px 0; }
   #toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
            background: #333; color: #fff; padding: 8px 16px; border-radius: 6px;
@@ -685,14 +689,19 @@ _ADJUDICATION_TEMPLATE = r"""<!DOCTYPE html>
   Sentences are grouped by <b>R1</b> (left); rows are coloured by <b>R2</b> (right).
   Singleton R2 clusters are shown in black and wrapped in [ brackets ]. An
   <u>underlined</u> R2 name means that cluster spans more than one R1 group on this page.
-  <b>Right-click</b> an R1 name, R2 name, or a sentence to adjudicate, or edit the R1/R2
-  cells in the table directly. Changes stay pending until you <b>Submit</b> (which saves
-  to disk) or <b>Discard</b>.
+  <b>Right-click</b> an R1 name, R2 name, or a sentence to adjudicate — these changes are
+  applied and saved to disk immediately. Edits made directly in the R1/R2 table cells stay
+  pending until you <b>Submit</b> (which saves to disk) or <b>Discard</b>.
+  Press <b>Cmd/Ctrl+Z</b> to undo the last saved change (or discard a pending edit).
 </p>
 <div class="toolbar">
   <button id="prev-btn" onclick="prevPage()">&larr; Prev</button>
   <span id="page-label"></span>
   <button id="next-btn" onclick="nextPage()">Next &rarr;</button>
+  <span class="spacer"></span>
+  <button id="save-csv-btn" onclick="saveCsv()">Save CSV</button>
+  <button id="load-csv-btn" onclick="loadCsvClick()">Load CSV&hellip;</button>
+  <input type="file" id="csv-file" accept=".csv,text/csv" style="display:none">
 </div>
 <div class="banner" id="banner">Pending change — Submit or Discard to continue.</div>
 
@@ -878,7 +887,7 @@ function uniquePrefixed(name, existing) {
 function makeNewCluster(rec) {
   rec.r1 = uniquePrefixed('New - ' + rec.r1, allR1());
   rec.r2 = uniquePrefixed('New - ' + rec.r2, allR2());
-  markDirty(); render();
+  applyDirect();
 }
 function renameAll(field, oldName) {
   const nn = prompt('Rename all "' + oldName + '" to:', oldName);
@@ -886,7 +895,7 @@ function renameAll(field, oldName) {
   const v = nn.trim();
   if (!v || v === oldName) return;
   for (const r of draft) if (r[field] === oldName) r[field] = v;
-  markDirty(); render();
+  applyDirect();
 }
 
 // ---- Context menu ----
@@ -898,11 +907,56 @@ document.addEventListener('contextmenu', function(e) {
   openMenu(e.pageX, e.pageY, el.dataset.role, +el.dataset.id);
 });
 document.addEventListener('click', closeMenu);
-document.addEventListener('scroll', closeMenu, true);
+document.addEventListener('scroll', e => {
+  if (e.target instanceof Element && e.target.closest('.ctx-menu')) return;
+  closeMenu();
+}, true);
 
 function closeMenu() {
+  closeSubmenu();
   const m = document.getElementById('ctx-menu');
   if (m) m.remove();
+}
+
+function closeSubmenu() {
+  const s = document.getElementById('ctx-submenu');
+  if (s) s.remove();
+  const open = document.querySelector('.ctx-item.ctx-sub.open');
+  if (open) open.classList.remove('open');
+}
+
+function openSubmenu(anchorItem, options, apply) {
+  closeSubmenu();
+  anchorItem.classList.add('open');
+  const main = document.getElementById('ctx-menu');
+  const sub = document.createElement('div');
+  sub.className = 'ctx-menu';
+  sub.id = 'ctx-submenu';
+  const addOpt = label => {
+    const d = document.createElement('div');
+    d.className = 'ctx-item';
+    d.textContent = label;
+    d.addEventListener('click', ev => { ev.stopPropagation(); closeMenu(); apply(label); });
+    sub.appendChild(d);
+  };
+  options.shortlist.forEach(addOpt);
+  if (options.shortlist.length && options.bottom.length) {
+    const d = document.createElement('div');
+    d.className = 'ctx-div'; sub.appendChild(d);
+  }
+  options.bottom.forEach(addOpt);
+  document.body.appendChild(sub);
+  const mr = main.getBoundingClientRect();
+  const ir = anchorItem.getBoundingClientRect();
+  const w = sub.offsetWidth, h = sub.offsetHeight;
+  let left = mr.right + window.scrollX + 2;
+  if (left + w > window.scrollX + window.innerWidth - 6) {
+    left = Math.max(window.scrollX + 6, mr.left + window.scrollX - w - 2);
+  }
+  let top = ir.top + window.scrollY - 4;
+  top = Math.min(top, window.scrollY + window.innerHeight - h - 6);
+  sub.style.left = left + 'px';
+  sub.style.top = Math.max(window.scrollY + 6, top) + 'px';
 }
 
 function openMenu(x, y, role, id) {
@@ -912,10 +966,6 @@ function openMenu(x, y, role, id) {
   const menu = document.createElement('div');
   menu.className = 'ctx-menu';
   menu.id = 'ctx-menu';
-  const addTitle = t => {
-    const d = document.createElement('div');
-    d.className = 'ctx-title'; d.textContent = t; menu.appendChild(d);
-  };
   const addItem = (label, fn, cls) => {
     const d = document.createElement('div');
     d.className = 'ctx-item' + (cls ? ' ' + cls : '');
@@ -923,29 +973,31 @@ function openMenu(x, y, role, id) {
     d.addEventListener('click', ev => { ev.stopPropagation(); closeMenu(); fn(); });
     menu.appendChild(d);
   };
-  const addDivider = () => {
+  const addSubmenuItem = (label, options, apply) => {
     const d = document.createElement('div');
-    d.className = 'ctx-div'; menu.appendChild(d);
+    d.className = 'ctx-item ctx-sub';
+    d.textContent = label;
+    d.addEventListener('click', ev => {
+      ev.stopPropagation();
+      if (d.classList.contains('open')) { closeSubmenu(); return; }
+      openSubmenu(d, options, apply);
+    });
+    menu.appendChild(d);
   };
 
   if (role === 'r2') {
-    addTitle('Reassign R2');
-    const { shortlist, bottom } = reassignR2Options(rec);
-    shortlist.forEach(l => addItem(l, () => { rec.r2 = l; markDirty(); render(); }));
-    if (shortlist.length && bottom.length) addDivider();
-    bottom.forEach(l => addItem(l, () => { rec.r2 = l; markDirty(); render(); }));
-    addDivider();
+    addSubmenuItem('Reassign R2', reassignR2Options(rec),
+                   l => { rec.r2 = l; applyDirect(); });
     addItem('Rename All…', () => renameAll('r2', rec.r2), 'ctx-action');
+    addItem('Reset to Original', () => { rec.r2 = rec.r2_original; applyDirect(); },
+            'ctx-action');
   } else if (role === 'r1') {
-    addTitle('Reassign R1');
-    const { shortlist, bottom } = reassignR1Options(rec);
-    shortlist.forEach(l => addItem(l, () => { rec.r1 = l; markDirty(); render(); }));
-    if (shortlist.length && bottom.length) addDivider();
-    bottom.forEach(l => addItem(l, () => { rec.r1 = l; markDirty(); render(); }));
-    addDivider();
+    addSubmenuItem('Reassign R1', reassignR1Options(rec),
+                   l => { rec.r1 = l; applyDirect(); });
     addItem('Rename All…', () => renameAll('r1', rec.r1), 'ctx-action');
+    addItem('Reset to Original', () => { rec.r1 = rec.r1_original; applyDirect(); },
+            'ctx-action');
   } else if (role === 'sent') {
-    addTitle('Sentence');
     addItem('Make new Cluster', () => makeNewCluster(rec), 'ctx-action');
   }
   document.body.appendChild(menu);
@@ -955,25 +1007,96 @@ function openMenu(x, y, role, id) {
 }
 
 // ---- Submit / discard ----
-function submitChange() {
-  fetch('/save', {
+function saveDraft() {
+  return fetch('/save', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ records: draft }),
   }).then(r => {
     if (!r.ok) throw new Error('save failed');
     committed = clone(draft);
+  });
+}
+function submitChange() {
+  pushUndo();
+  saveDraft().then(() => {
     dirty = false;
     render();
     toast('Saved to disk.');
-  }).catch(() => toast('Save failed — check the terminal.'));
+  }).catch(() => { undoStack.pop(); toast('Save failed — check the terminal.'); });
 }
+// Cluster-view (context menu) changes apply and save immediately — no pending state.
+function applyDirect() {
+  pushUndo();
+  render();
+  saveDraft().then(() => toast('Saved to disk.')).catch(() => {
+    undoStack.pop();
+    dirty = true;
+    render();
+    toast('Save failed — change is now pending; Submit to retry.');
+  });
+}
+
+// ---- Undo (Cmd/Ctrl+Z) ----
+let undoStack = [];
+function pushUndo() {
+  undoStack.push(clone(committed));
+  if (undoStack.length > 200) undoStack.shift();
+}
+function undo() {
+  if (dirty) { discardChange(); return; }
+  if (!undoStack.length) { toast('Nothing to undo.'); return; }
+  const snap = undoStack.pop();
+  draft = clone(snap);
+  render();
+  saveDraft().then(() => { render(); toast('Undid last change.'); })
+    .catch(() => {
+      undoStack.push(snap);
+      draft = clone(committed);
+      render();
+      toast('Undo failed — check the terminal.');
+    });
+}
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+    if (e.target instanceof Element && e.target.isContentEditable) return;
+    e.preventDefault();
+    undo();
+  }
+});
 function discardChange() {
   draft = clone(committed);
   dirty = false;
   render();
   toast('Change discarded.');
 }
+
+// ---- Save / load CSV ----
+function saveCsv() {
+  if (dirty) { toast('Submit or discard the pending change first.'); return; }
+  window.location.href = '/adjudicated.csv';
+}
+function loadCsvClick() {
+  if (dirty) { toast('Submit or discard the pending change first.'); return; }
+  document.getElementById('csv-file').click();
+}
+document.getElementById('csv-file').addEventListener('change', e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  if (!confirm('Load "' + file.name + '"? This replaces the current session '
+               + '(including undo history) and overwrites the adjudicated CSV on disk.')) return;
+  file.text().then(text =>
+    fetch('/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/csv' },
+      body: text,
+    })
+  ).then(r => {
+    if (!r.ok) return r.text().then(t => { throw new Error(t || r.statusText); });
+    location.reload();
+  }).catch(err => toast('Load failed: ' + err.message));
+});
 
 let _toastTimer = null;
 function toast(msg) {
@@ -991,62 +1114,67 @@ render();
 """
 
 
-def read_combined_csv(filepath):
-    """Read a combined adjudication CSV into a list of record dicts.
+def parse_combined_records(f, source):
+    """Parse a combined adjudication CSV from a file-like object.
 
     Accepts either the raw combined schema (Sentence, Annotator_1_Code,
     Annotator_2_Code) or a previously-adjudicated file (Sentence, R1, R2,
-    R1_Original, R2_Original) so work can be resumed.
+    R1_Original, R2_Original) so work can be resumed. Raises ValueError on
+    schema problems.
     """
     import csv as _csv
 
-    records = []
-    with open(filepath, encoding="utf-8", newline="") as f:
-        reader = _csv.DictReader(f)
-        cols = reader.fieldnames or []
-        if "Sentence" not in cols:
-            print(
-                f"Error: '{filepath}' is missing the 'Sentence' column. Expected a "
-                f"combined CSV — generate one with --combine.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        has_ann = "Annotator_1_Code" in cols and "Annotator_2_Code" in cols
-        has_r = "R1" in cols and "R2" in cols
-        if not (has_ann or has_r):
-            print(
-                f"Error: '{filepath}' must have either 'Annotator_1_Code'/"
-                f"'Annotator_2_Code' or 'R1'/'R2' columns.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+    reader = _csv.DictReader(f)
+    cols = reader.fieldnames or []
+    if "Sentence" not in cols:
+        raise ValueError(
+            f"'{source}' is missing the 'Sentence' column. Expected a "
+            f"combined CSV — generate one with --combine."
+        )
+    has_ann = "Annotator_1_Code" in cols and "Annotator_2_Code" in cols
+    has_r = "R1" in cols and "R2" in cols
+    if not (has_ann or has_r):
+        raise ValueError(
+            f"'{source}' must have either 'Annotator_1_Code'/"
+            f"'Annotator_2_Code' or 'R1'/'R2' columns."
+        )
 
-        for i, row in enumerate(reader):
-            sentence = (row.get("Sentence") or "").strip()
-            if has_r:
-                r1 = (row.get("R1") or "").strip()
-                r2 = (row.get("R2") or "").strip()
-            else:
-                r1 = (row.get("Annotator_1_Code") or "").strip()
-                r2 = (row.get("Annotator_2_Code") or "").strip()
-            r1_orig = (row.get("R1_Original") or "").strip() or (
-                (row.get("Annotator_1_Code") or "").strip() or r1
-            )
-            r2_orig = (row.get("R2_Original") or "").strip() or (
-                (row.get("Annotator_2_Code") or "").strip() or r2
-            )
-            records.append({
-                "id": i,
-                "sentence": sentence,
-                "r1": r1,
-                "r2": r2,
-                "r1_original": r1_orig,
-                "r2_original": r2_orig,
-            })
+    records = []
+    for i, row in enumerate(reader):
+        sentence = (row.get("Sentence") or "").strip()
+        if has_r:
+            r1 = (row.get("R1") or "").strip()
+            r2 = (row.get("R2") or "").strip()
+        else:
+            r1 = (row.get("Annotator_1_Code") or "").strip()
+            r2 = (row.get("Annotator_2_Code") or "").strip()
+        r1_orig = (row.get("R1_Original") or "").strip() or (
+            (row.get("Annotator_1_Code") or "").strip() or r1
+        )
+        r2_orig = (row.get("R2_Original") or "").strip() or (
+            (row.get("Annotator_2_Code") or "").strip() or r2
+        )
+        records.append({
+            "id": i,
+            "sentence": sentence,
+            "r1": r1,
+            "r2": r2,
+            "r1_original": r1_orig,
+            "r2_original": r2_orig,
+        })
     if not records:
-        print(f"Error: '{filepath}' contains no rows.", file=sys.stderr)
-        sys.exit(1)
+        raise ValueError(f"'{source}' contains no rows.")
     return records
+
+
+def read_combined_csv(filepath):
+    """Read a combined adjudication CSV file; exits with an error message on failure."""
+    try:
+        with open(filepath, encoding="utf-8", newline="") as f:
+            return parse_combined_records(f, filepath)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
 
 
 def compute_pages(records):
@@ -1099,19 +1227,27 @@ def compute_pages(records):
     return len(pages)
 
 
-def write_adjudication_csv(records, output_path):
-    """Write the adjudicated records, sorted by R1 then Sentence."""
+def adjudication_csv_text(records):
+    """Render the adjudicated records as CSV text, sorted by R1 then Sentence."""
     import csv as _csv
+    import io
 
     ordered = sorted(records, key=lambda r: (r.get("r1", ""), r.get("sentence", "")))
+    buf = io.StringIO()
+    w = _csv.writer(buf)
+    w.writerow(["Sentence", "R1", "R2", "R1_Original", "R2_Original"])
+    for r in ordered:
+        w.writerow([
+            r.get("sentence", ""), r.get("r1", ""), r.get("r2", ""),
+            r.get("r1_original", ""), r.get("r2_original", ""),
+        ])
+    return buf.getvalue()
+
+
+def write_adjudication_csv(records, output_path):
+    """Write the adjudicated records, sorted by R1 then Sentence."""
     with open(output_path, "w", encoding="utf-8", newline="") as f:
-        w = _csv.writer(f)
-        w.writerow(["Sentence", "R1", "R2", "R1_Original", "R2_Original"])
-        for r in ordered:
-            w.writerow([
-                r.get("sentence", ""), r.get("r1", ""), r.get("r2", ""),
-                r.get("r1_original", ""), r.get("r2_original", ""),
-            ])
+        f.write(adjudication_csv_text(records))
 
 
 def _adjudication_html(records, n_pages):
@@ -1133,7 +1269,7 @@ def run_live_adjudication(input_csv, output_path, port):
 
     records = read_combined_csv(input_csv)
     n_pages = compute_pages(records)
-    state = {"records": records}
+    state = {"records": records, "n_pages": n_pages}
     write_adjudication_csv(records, output_path)
 
     if n_pages == 0:
@@ -1142,7 +1278,7 @@ def run_live_adjudication(input_csv, output_path, port):
         return
 
     def html_bytes():
-        return _adjudication_html(state["records"], n_pages).encode("utf-8")
+        return _adjudication_html(state["records"], state["n_pages"]).encode("utf-8")
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def log_message(self, *_args):
@@ -1153,6 +1289,16 @@ def run_live_adjudication(input_csv, output_path, port):
                 body = html_bytes()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            elif self.path == "/adjudicated.csv":
+                body = adjudication_csv_text(state["records"]).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/csv; charset=utf-8")
+                self.send_header(
+                    "Content-Disposition", 'attachment; filename="adjudicated.csv"'
+                )
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
@@ -1170,6 +1316,31 @@ def run_live_adjudication(input_csv, output_path, port):
                     write_adjudication_csv(recs, output_path)
                 except Exception as exc:  # noqa: BLE001
                     self.send_response(500)
+                    self.end_headers()
+                    self.wfile.write(str(exc).encode("utf-8"))
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"ok":true}')
+            elif self.path == "/upload":
+                import io
+
+                length = int(self.headers.get("Content-Length", 0))
+                text = self.rfile.read(length).decode("utf-8-sig", errors="replace")
+                try:
+                    recs = parse_combined_records(io.StringIO(text), "uploaded file")
+                    n = compute_pages(recs)
+                    if n == 0:
+                        raise ValueError(
+                            "the uploaded file has no conflicts to adjudicate."
+                        )
+                    state["records"] = recs
+                    state["n_pages"] = n
+                    write_adjudication_csv(recs, output_path)
+                except Exception as exc:  # noqa: BLE001
+                    self.send_response(400)
+                    self.send_header("Content-Type", "text/plain; charset=utf-8")
                     self.end_headers()
                     self.wfile.write(str(exc).encode("utf-8"))
                     return
@@ -1212,7 +1383,20 @@ def main():
             sys.exit(1)
         output = args.output
         if output == "comparison.html":
+            import csv as _csv
+
             output = "adjudicated.csv"
+            # If the input is already an adjudicated file (R1/R2 schema) and no
+            # -o was given, resume in place: save changes back to that file.
+            try:
+                with open(args.files[0], encoding="utf-8-sig", newline="") as f:
+                    cols = next(_csv.reader(f), [])
+            except OSError as exc:
+                print(f"Error: cannot read '{args.files[0]}': {exc}", file=sys.stderr)
+                sys.exit(1)
+            if "R1" in cols and "R2" in cols:
+                output = args.files[0]
+                print(f"Resuming adjudication of '{output}' (saving in place).")
         run_live_adjudication(args.files[0], output, args.port)
         return
 

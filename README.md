@@ -47,21 +47,25 @@ just Python's standard library — then opens the GUI in your browser.
 
 **Adjudication controls** (right-click):
 
-| Right-click on | Menu | Effect |
+| Right-click on | Menu option | Effect |
 |---|---|---|
-| An **R2** name | *Reassign R2* | Change that sentence's R2 cluster. The dropdown lists the most relevant clusters first (those sharing the sentence's R1 group, then those co-occurring with the current R2 cluster elsewhere), a divider, then all remaining R2 clusters alphabetically. |
-| An **R1** name | *Reassign R1* | Change that sentence's R1 cluster, with a similarly-ranked shortlist. |
-| A **sentence** | *Make new Cluster* | Move the sentence into a brand-new cluster created directly beneath the current one (`New - ` is prepended to both its R1 and R2 names until unique). |
+| An **R1 or R2** name | *Reassign R1 / Reassign R2* | Opens an adjacent submenu listing the clusters the sentence can move to — the most relevant first (those sharing the sentence's R1 group, then those co-occurring with the current cluster elsewhere), a divider, then all remaining clusters alphabetically. |
 | An **R1 or R2** name | *Rename All…* | Rename every instance of that cluster name at once. |
+| An **R1 or R2** name | *Reset to Original* | Revert that sentence's R1/R2 back to the original annotation (`R1_Original`/`R2_Original`). |
+| A **sentence** | *Make new Cluster* | Move the sentence into a brand-new cluster created directly beneath the current one (`New - ` is prepended to both its R1 and R2 names until unique). |
 
-Cells in the table (except Sentence, R1_Original and R2_Original) can also be edited
-directly. All edits stay **pending** — the right-click controls lock — until you press
-**Submit change** (which re-renders the view and saves the adjudicated CSV to disk) or
-**Discard change** (which reverts). Move between pages with **Prev/Next**.
+Right-click actions are **applied and saved to disk immediately**. The R1/R2 cells in
+the table can also be edited directly; those edits stay **pending** — the right-click
+controls and page navigation lock — until you press **Submit change** (saves to disk)
+or **Discard change** (reverts). Press **Cmd/Ctrl+Z** to undo the last saved change
+(or discard a pending table edit). Move between pages with **Prev/Next**.
 
 The output is a single adjudicated CSV (`Sentence, R1, R2, R1_Original, R2_Original`)
-written on every submitted change, so nothing is lost if the browser closes. Re-running
-`--live-adjudication` on that output file resumes where you left off.
+written on every change, so nothing is lost if the browser closes. **Save CSV** (in the
+toolbar) downloads a copy of the current adjudicated file. To pick up where you left
+off, either re-run `--live-adjudication` on an adjudicated file (with no `-o`, changes
+are saved back to the same file) or use the **Load CSV…** button to upload one —
+this replaces the current session, its undo history, and the adjudicated CSV on disk.
 
 ## Requirements
 
@@ -99,7 +103,7 @@ python clustering_comparison.py <file1.csv> <file2.csv> [file3.csv] [options]
 | `--use-keys` | Match quotes by the numeric key `(N)` at the end of each quote instead of by exact text |
 | `--check` | Validate that the CSV files are compatible without generating any HTML |
 | `--combine` | Combine two annotation CSVs into a single adjudication CSV (`Sentence, Annotator_1_Code, Annotator_2_Code`) written to `--output`. Requires exactly 2 files. |
-| `--live-adjudication` | Launch the interactive two-annotator adjudication GUI. Takes a single combined CSV (from `--combine`); writes the adjudicated CSV to `--output`. |
+| `--live-adjudication` | Launch the interactive two-annotator adjudication GUI. Takes a single combined CSV (from `--combine`) or a previously adjudicated CSV to resume; writes the adjudicated CSV to `--output` (when resuming without `-o`, saves back to the input file). |
 | `--port` | Port for the `--live-adjudication` local server (default: `8000`). |
 
 ### Examples
@@ -132,10 +136,15 @@ python clustering_comparison.py Example_Data/Kevin_annotations.csv Example_Data/
 
 # 2. Launch the interactive adjudication GUI (opens in your browser)
 python clustering_comparison.py combined.csv --live-adjudication -o adjudicated.csv
+
+# 3. Later: resume a previous session — changes save back to adjudicated.csv
+python clustering_comparison.py adjudicated.csv --live-adjudication
 ```
 
 If `-o` is omitted, `--combine` defaults to `combined.csv` and `--live-adjudication`
-defaults to `adjudicated.csv`. Press `Ctrl+C` in the terminal to stop the server.
+defaults to `adjudicated.csv` — unless the input is itself an adjudicated file, in
+which case changes are saved back to that file. Press `Ctrl+C` in the terminal to stop
+the server.
 
 ### Checking compatibility
 

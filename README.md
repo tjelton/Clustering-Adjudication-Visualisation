@@ -50,6 +50,7 @@ just Python's standard library — then opens the GUI in your browser.
 | Right-click on | Menu option | Effect |
 |---|---|---|
 | An **R1 or R2** name | *Reassign R1 / Reassign R2* | Opens an adjacent submenu listing the clusters the sentence can move to — the most relevant first (those sharing the sentence's R1 group, then those co-occurring with the current cluster elsewhere), a divider, then all remaining clusters alphabetically. |
+| An **R1 or R2** name | *Make New R1/R2 Cluster Name…* | Type a brand-new cluster name and move just that sentence into it (rejected if the name already exists — use *Reassign* for that). |
 | An **R1 or R2** name | *Rename All…* | Rename every instance of that cluster name at once. |
 | An **R1 or R2** name | *Reset to Original* | Revert that sentence's R1/R2 back to the original annotation (`R1_Original`/`R2_Original`). |
 | A **sentence** | *Make new Cluster* | Move the sentence into a brand-new cluster created directly beneath the current one (`New - ` is prepended to both its R1 and R2 names until unique). |

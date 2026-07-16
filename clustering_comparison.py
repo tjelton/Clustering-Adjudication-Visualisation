@@ -1413,6 +1413,15 @@ def main():
             if "R1" in cols and "R2" in cols:
                 output = args.files[0]
                 print(f"Resuming adjudication of '{output}' (saving in place).")
+        if os.path.abspath(output) != os.path.abspath(args.files[0]) and os.path.exists(output):
+            print(
+                f"Error: output file '{output}' already exists and would be "
+                "overwritten. To resume that adjudication, run:\n"
+                f"  python {os.path.basename(sys.argv[0])} {output} --live-adjudication\n"
+                "Otherwise choose a different -o path or delete the file first.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         run_live_adjudication(args.files[0], output, args.port)
         return
 

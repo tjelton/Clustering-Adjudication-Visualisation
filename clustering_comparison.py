@@ -897,6 +897,20 @@ function renameAll(field, oldName) {
   for (const r of draft) if (r[field] === oldName) r[field] = v;
   applyDirect();
 }
+function makeNewName(field, rec) {
+  const label = field === 'r1' ? 'R1' : 'R2';
+  const nn = prompt('New ' + label + ' cluster name for this sentence:', rec[field]);
+  if (nn === null) return;
+  const v = nn.trim();
+  if (!v || v === rec[field]) return;
+  const existing = field === 'r1' ? allR1() : allR2();
+  if (existing.includes(v)) {
+    toast('An ' + label + ' cluster called "' + v + '" already exists — use Reassign instead.');
+    return;
+  }
+  rec[field] = v;
+  applyDirect();
+}
 
 // ---- Context menu ----
 document.addEventListener('contextmenu', function(e) {
@@ -988,12 +1002,14 @@ function openMenu(x, y, role, id) {
   if (role === 'r2') {
     addSubmenuItem('Reassign R2', reassignR2Options(rec),
                    l => { rec.r2 = l; applyDirect(); });
+    addItem('Make New R2 Cluster Name…', () => makeNewName('r2', rec), 'ctx-action');
     addItem('Rename All…', () => renameAll('r2', rec.r2), 'ctx-action');
     addItem('Reset to Original', () => { rec.r2 = rec.r2_original; applyDirect(); },
             'ctx-action');
   } else if (role === 'r1') {
     addSubmenuItem('Reassign R1', reassignR1Options(rec),
                    l => { rec.r1 = l; applyDirect(); });
+    addItem('Make New R1 Cluster Name…', () => makeNewName('r1', rec), 'ctx-action');
     addItem('Rename All…', () => renameAll('r1', rec.r1), 'ctx-action');
     addItem('Reset to Original', () => { rec.r1 = rec.r1_original; applyDirect(); },
             'ctx-action');

@@ -769,14 +769,26 @@ function r2Counts() {
 }
 function allR1() { return [...new Set(draft.map(r => r.r1))]; }
 function allR2() { return [...new Set(draft.map(r => r.r2))]; }
-function hashHue(s) {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-  return ((h % 360) + 360) % 360;
-}
-function colourFor(label, counts) {
-  if ((counts[label] || 0) <= 1) return null;
-  return 'hsl(' + hashHue(label) + ', 60%, 42%)';
+// Distinct hues, each with >= 4.5:1 contrast on white and well clear of the
+// black used for singletons. Ordered so the first few are the most distinct.
+const PALETTE = ['#1F5FD6', '#D62728', '#107C35', '#8E24AA', '#C25100',
+                 '#00838F', '#C2185B', '#7A5C00', '#5B7F00', '#5E35B1'];
+// Colour map for the R2 clusters on one page. Clusters are numbered in a
+// stable order (the page's original R2 labels, then any labels moved in),
+// so each page starts from the top of the palette and colours don't shuffle
+// as sentences are edited. Singletons map to null (rendered black).
+function pageColours(recs, counts) {
+  const orig = [...new Set(recs.map(r => r.r2_original))].sort(cmpLabel);
+  const extra = [...new Set(recs.map(r => r.r2))]
+      .filter(l => !orig.includes(l)).sort(cmpLabel);
+  const map = {};
+  let i = 0;
+  for (const label of orig.concat(extra)) {
+    if ((counts[label] || 0) <= 1) { map[label] = null; continue; }
+    if (!recs.some(r => r.r2 === label)) continue;
+    map[label] = PALETTE[i++ % PALETTE.length];
+  }
+  return map;
 }
 function pageRecords() { return draft.filter(r => r.page === currentPage); }
 
@@ -792,6 +804,7 @@ function renderNav() {
 function renderViz() {
   const recs = pageRecords();
   const counts = r2Counts();
+  const colours = pageColours(recs, counts);
   const groups = {};
   for (const r of recs) (groups[r.r1] = groups[r.r1] || []).push(r);
   const r1keys = Object.keys(groups).sort(cmpLabel);
@@ -808,7 +821,7 @@ function renderViz() {
     if (gi > 0) html += '<hr class="grp-sep">';
     const rows = groups[r1].slice().sort((a, b) => cmpStr(a.sentence, b.sentence));
     for (const r of rows) {
-      const col = colourFor(r.r2, counts);
+      const col = colours[r.r2] ?? null;
       const colour = col || '#000000';
       const single = col === null;
       const sent = single ? '[ ' + esc(r.sentence) + ' ]' : esc(r.sentence);

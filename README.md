@@ -54,6 +54,11 @@ into that cluster. Clicking its own group, clicking outside the groups, or press
 cancels. The move is applied and saved immediately, and **Cmd/Ctrl+Z** undoes it. To move a
 sentence to an R1 cluster that isn't on the current page, use *Reassign R1* below.
 
+**Click-to-move (R2):** left-click a sentence's **R2** name to pick it up, then click
+another sentence's R2 name on the page to put the sentence in that R2 cluster. Clicking an
+R2 name with the same label, clicking anywhere else, or pressing **Esc** cancels. Saved
+immediately and undoable with **Cmd/Ctrl+Z**; use *Reassign R2* for clusters on other pages.
+
 **Adjudication controls** (right-click):
 
 | Right-click on | Menu option | Effect |

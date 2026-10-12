@@ -39,6 +39,9 @@ just Python's standard library — then opens the GUI in your browser.
 
 - Sentences are grouped by **R1** (Researcher 1, left column) and colour-coded by
   **R2** (Researcher 2, right column), with the sentence in the middle.
+- The page header and column headings show **which source file is R1 and which is R2**
+  (the first and second files passed to `--combine`). The names are also printed in the
+  terminal when you combine and when the server starts.
 - The tool splits the work into **pages** — one per set of clusters that are entangled
   between the two annotators (a connected component of shared clusters). Pages where R1
   and R2 fully agree are skipped so you only see genuine conflicts.
@@ -61,8 +64,8 @@ controls and page navigation lock — until you press **Submit change** (saves t
 or **Discard change** (reverts). Press **Cmd/Ctrl+Z** to undo the last saved change
 (or discard a pending table edit). Move between pages with **Prev/Next**.
 
-The output is a single adjudicated CSV (`Sentence, R1, R2, R1_Original, R2_Original`)
-written on every change, so nothing is lost if the browser closes. **Save CSV** (in the
+The output is a single adjudicated CSV (`Sentence, R1, R2, R1_Original, R2_Original,
+R1_File, R2_File`) written on every change, so nothing is lost if the browser closes. **Save CSV** (in the
 toolbar) downloads a copy of the current adjudicated file. To pick up where you left
 off, either re-run `--live-adjudication` on an adjudicated file (with no `-o`, changes
 are saved back to the same file) or use the **Load CSV…** button to upload one —
@@ -103,7 +106,7 @@ python clustering_comparison.py <file1.csv> <file2.csv> [file3.csv] [options]
 | `-o`, `--output` | Output HTML file path (default: `comparison.html`) |
 | `--use-keys` | Match quotes by the numeric key `(N)` at the end of each quote instead of by exact text |
 | `--check` | Validate that the CSV files are compatible without generating any HTML |
-| `--combine` | Combine two annotation CSVs into a single adjudication CSV (`Sentence, Annotator_1_Code, Annotator_2_Code`) written to `--output`. Requires exactly 2 files. |
+| `--combine` | Combine two annotation CSVs into a single adjudication CSV (`Sentence, Annotator_1_Code, Annotator_2_Code, Annotator_1_File, Annotator_2_File`) written to `--output`. The `*_File` columns record each source file's name so live adjudication can show which is R1 and which is R2. Requires exactly 2 files. |
 | `--live-adjudication` | Launch the interactive two-annotator adjudication GUI. Takes a single combined CSV (from `--combine`) or a previously adjudicated CSV to resume; writes the adjudicated CSV to `--output` (when resuming without `-o`, saves back to the input file). |
 | `--port` | Port for the `--live-adjudication` local server (default: `8000`). |
 
@@ -141,6 +144,10 @@ python clustering_comparison.py combined.csv --live-adjudication -o adjudicated.
 # 3. Later: resume a previous session — changes save back to adjudicated.csv
 python clustering_comparison.py adjudicated.csv --live-adjudication
 ```
+
+Combined or adjudicated CSVs made before the `*_File` columns existed still load; the
+page just shows "(source file not recorded)" for R1 and R2. Re-run `--combine` to record
+the file names.
 
 If `-o` is omitted, `--combine` defaults to `combined.csv` and `--live-adjudication`
 defaults to `adjudicated.csv` — unless the input is itself an adjudicated file, in

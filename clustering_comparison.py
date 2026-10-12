@@ -56,7 +56,8 @@ def parse_args():
         "--combine",
         action="store_true",
         help="Combine two annotation CSVs into a single adjudication CSV with columns "
-        "Sentence, Annotator_1_Code, Annotator_2_Code (written to --output)",
+        "Sentence, Annotator_1_Code, Annotator_2_Code, Annotator_1_File, "
+        "Annotator_2_File (written to --output)",
     )
     parser.add_argument(
         "--live-adjudication",
@@ -187,26 +188,34 @@ def validate_matching_pair(rows_a, rows_b, file_a, file_b, use_keys):
 # Combine two CSVs into a single adjudication CSV
 # ---------------------------------------------------------------------------
 
-def combine_csvs(rows_a, rows_b, use_keys, output_path):
-    """Write a single CSV with columns Sentence, Annotator_1_Code, Annotator_2_Code.
+def combine_csvs(rows_a, rows_b, use_keys, output_path, file_a, file_b):
+    """Write a single CSV with columns Sentence, Annotator_1_Code, Annotator_2_Code,
+    Annotator_1_File, Annotator_2_File.
 
     Rows are emitted in the order of the first file. Annotator 2's code is looked
     up by the numeric key (--use-keys) or by exact quote text. Annotator 1's quote
-    text is used as the Sentence.
+    text is used as the Sentence. The *_File columns record the basename of each
+    source CSV so live adjudication can show which file is R1 and which is R2.
     """
     import csv as _csv
 
     lookup_b = build_lookup_map(rows_b, use_keys)
+    name_a, name_b = os.path.basename(file_a), os.path.basename(file_b)
 
     with open(output_path, "w", encoding="utf-8", newline="") as f:
         writer = _csv.writer(f)
-        writer.writerow(["Sentence", "Annotator_1_Code", "Annotator_2_Code"])
+        writer.writerow([
+            "Sentence", "Annotator_1_Code", "Annotator_2_Code",
+            "Annotator_1_File", "Annotator_2_File",
+        ])
         for row in rows_a:
             quote = row["Quote"]
             k = extract_key(quote) if use_keys else quote.strip()
-            writer.writerow([quote, row["Code_Name"], lookup_b[k]])
+            writer.writerow([quote, row["Code_Name"], lookup_b[k], name_a, name_b])
 
     print(f"Combined adjudication CSV written to {output_path} ({len(rows_a)} rows)")
+    print(f"  R1 = {name_a}")
+    print(f"  R2 = {name_b}")
 
 
 # ---------------------------------------------------------------------------
@@ -634,6 +643,9 @@ _ADJUDICATION_TEMPLATE = r"""<!DOCTYPE html>
          margin: 0; padding: 0 0 40px 0; color: #222; }
   h1 { font-size: 20px; padding: 16px 20px 0 20px; margin: 0; }
   .explainer { padding: 6px 20px 0 20px; color: #555; font-size: 13px; max-width: 1100px; }
+  .sources { padding: 8px 20px 0 20px; font-size: 14px; }
+  .sources code { background: #f0f0f0; padding: 1px 6px; border-radius: 4px; }
+  .col-file { font-weight: 400; color: #666; font-size: 12px; }
   .toolbar { position: sticky; top: 0; background: #fff; z-index: 50;
              padding: 12px 20px; border-bottom: 1px solid #ddd; display: flex;
              align-items: center; gap: 12px; flex-wrap: wrap; }
@@ -685,6 +697,7 @@ _ADJUDICATION_TEMPLATE = r"""<!DOCTYPE html>
 </head>
 <body>
 <h1>Live Adjudication — Researcher 1 (R1) vs Researcher 2 (R2)</h1>
+<div class="sources" id="sources"></div>
 <p class="explainer">
   Sentences are grouped by <b>R1</b> (left); rows are coloured by <b>R2</b> (right).
   Singleton R2 clusters are shown in black and wrapped in [ brackets ]. An
@@ -718,6 +731,7 @@ _ADJUDICATION_TEMPLATE = r"""<!DOCTYPE html>
 <div id="toast"></div>
 
 <script>
+const SOURCES = __SOURCES__;
 const INITIAL = __INITIAL_DATA__;
 const N_PAGES = __N_PAGES__;
 let committed = INITIAL.records.map(r => ({...r}));
@@ -728,6 +742,10 @@ let currentPage = 0;
 function clone(arr) { return arr.map(r => ({...r})); }
 function esc(s) { return (s == null ? '' : String(s))
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function sourceName(role) { return SOURCES[role] || '(source file not recorded)'; }
+document.getElementById('sources').innerHTML =
+  '<b>R1</b> = <code>' + esc(sourceName('r1')) + '</code> &nbsp;&middot;&nbsp; '
+  + '<b>R2</b> = <code>' + esc(sourceName('r2')) + '</code>';
 
 // Ordering: strip leading "New - " so a new cluster sorts directly under its base.
 function baseOf(label) {
@@ -781,8 +799,10 @@ function renderViz() {
   const r2r1 = {};
   for (const r of recs) (r2r1[r.r2] = r2r1[r.r2] || new Set()).add(r.r1);
 
-  let html = '<div class="viz-header"><div class="col-r1">R1</div>'
-      + '<div class="col-sent">Sentence</div><div class="col-r2">R2</div></div>';
+  const fileTag = role => SOURCES[role]
+      ? ' <span class="col-file">(' + esc(SOURCES[role]) + ')</span>' : '';
+  let html = '<div class="viz-header"><div class="col-r1">R1' + fileTag('r1') + '</div>'
+      + '<div class="col-sent">Sentence</div><div class="col-r2">R2' + fileTag('r2') + '</div></div>';
 
   r1keys.forEach((r1, gi) => {
     if (gi > 0) html += '<hr class="grp-sep">';
@@ -1134,8 +1154,11 @@ def parse_combined_records(f, source):
     """Parse a combined adjudication CSV from a file-like object.
 
     Accepts either the raw combined schema (Sentence, Annotator_1_Code,
-    Annotator_2_Code) or a previously-adjudicated file (Sentence, R1, R2,
-    R1_Original, R2_Original) so work can be resumed. Raises ValueError on
+    Annotator_2_Code[, Annotator_1_File, Annotator_2_File]) or a
+    previously-adjudicated file (Sentence, R1, R2, R1_Original, R2_Original
+    [, R1_File, R2_File]) so work can be resumed. Returns (records, sources),
+    where sources is {"r1": ..., "r2": ...} holding each annotator's source file
+    name ("" when the CSV predates the *_File columns). Raises ValueError on
     schema problems.
     """
     import csv as _csv
@@ -1156,7 +1179,14 @@ def parse_combined_records(f, source):
         )
 
     records = []
+    sources = {"r1": "", "r2": ""}
     for i, row in enumerate(reader):
+        for role, n in (("r1", "1"), ("r2", "2")):
+            if not sources[role]:
+                sources[role] = (
+                    (row.get(f"R{n}_File") or "").strip()
+                    or (row.get(f"Annotator_{n}_File") or "").strip()
+                )
         sentence = (row.get("Sentence") or "").strip()
         if has_r:
             r1 = (row.get("R1") or "").strip()
@@ -1180,7 +1210,7 @@ def parse_combined_records(f, source):
         })
     if not records:
         raise ValueError(f"'{source}' contains no rows.")
-    return records
+    return records, sources
 
 
 def read_combined_csv(filepath):
@@ -1243,7 +1273,7 @@ def compute_pages(records):
     return len(pages)
 
 
-def adjudication_csv_text(records):
+def adjudication_csv_text(records, sources):
     """Render the adjudicated records as CSV text, sorted by R1 then Sentence."""
     import csv as _csv
     import io
@@ -1251,27 +1281,31 @@ def adjudication_csv_text(records):
     ordered = sorted(records, key=lambda r: (r.get("r1", ""), r.get("sentence", "")))
     buf = io.StringIO()
     w = _csv.writer(buf)
-    w.writerow(["Sentence", "R1", "R2", "R1_Original", "R2_Original"])
+    w.writerow(["Sentence", "R1", "R2", "R1_Original", "R2_Original", "R1_File", "R2_File"])
     for r in ordered:
         w.writerow([
             r.get("sentence", ""), r.get("r1", ""), r.get("r2", ""),
             r.get("r1_original", ""), r.get("r2_original", ""),
+            sources["r1"], sources["r2"],
         ])
     return buf.getvalue()
 
 
-def write_adjudication_csv(records, output_path):
+def write_adjudication_csv(records, sources, output_path):
     """Write the adjudicated records, sorted by R1 then Sentence."""
     with open(output_path, "w", encoding="utf-8", newline="") as f:
-        f.write(adjudication_csv_text(records))
+        f.write(adjudication_csv_text(records, sources))
 
 
-def _adjudication_html(records, n_pages):
+def _adjudication_html(records, n_pages, sources):
     import json
 
     data = json.dumps({"records": records})
+    # Escape "</" so a file name can never close the <script> block.
+    sources_js = json.dumps(sources).replace("</", "<\\/")
     return (
         _ADJUDICATION_TEMPLATE
+        .replace("__SOURCES__", sources_js)
         .replace("__INITIAL_DATA__", data)
         .replace("__N_PAGES__", str(n_pages))
     )
@@ -1283,10 +1317,10 @@ def run_live_adjudication(input_csv, output_path, port):
     import threading
     import webbrowser
 
-    records = read_combined_csv(input_csv)
+    records, sources = read_combined_csv(input_csv)
     n_pages = compute_pages(records)
-    state = {"records": records, "n_pages": n_pages}
-    write_adjudication_csv(records, output_path)
+    state = {"records": records, "n_pages": n_pages, "sources": sources}
+    write_adjudication_csv(records, sources, output_path)
 
     if n_pages == 0:
         print("The two annotators fully agree — there are no conflicts to adjudicate.")
@@ -1294,7 +1328,9 @@ def run_live_adjudication(input_csv, output_path, port):
         return
 
     def html_bytes():
-        return _adjudication_html(state["records"], state["n_pages"]).encode("utf-8")
+        return _adjudication_html(
+            state["records"], state["n_pages"], state["sources"]
+        ).encode("utf-8")
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def log_message(self, *_args):
@@ -1309,7 +1345,7 @@ def run_live_adjudication(input_csv, output_path, port):
                 self.end_headers()
                 self.wfile.write(body)
             elif self.path == "/adjudicated.csv":
-                body = adjudication_csv_text(state["records"]).encode("utf-8")
+                body = adjudication_csv_text(state["records"], state["sources"]).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/csv; charset=utf-8")
                 self.send_header(
@@ -1329,7 +1365,7 @@ def run_live_adjudication(input_csv, output_path, port):
                     payload = json.loads(self.rfile.read(length) or b"{}")
                     recs = payload.get("records", [])
                     state["records"] = recs
-                    write_adjudication_csv(recs, output_path)
+                    write_adjudication_csv(recs, state["sources"], output_path)
                 except Exception as exc:  # noqa: BLE001
                     self.send_response(500)
                     self.end_headers()
@@ -1345,7 +1381,7 @@ def run_live_adjudication(input_csv, output_path, port):
                 length = int(self.headers.get("Content-Length", 0))
                 text = self.rfile.read(length).decode("utf-8-sig", errors="replace")
                 try:
-                    recs = parse_combined_records(io.StringIO(text), "uploaded file")
+                    recs, srcs = parse_combined_records(io.StringIO(text), "uploaded file")
                     n = compute_pages(recs)
                     if n == 0:
                         raise ValueError(
@@ -1353,7 +1389,8 @@ def run_live_adjudication(input_csv, output_path, port):
                         )
                     state["records"] = recs
                     state["n_pages"] = n
-                    write_adjudication_csv(recs, output_path)
+                    state["sources"] = srcs
+                    write_adjudication_csv(recs, srcs, output_path)
                 except Exception as exc:  # noqa: BLE001
                     self.send_response(400)
                     self.send_header("Content-Type", "text/plain; charset=utf-8")
@@ -1371,6 +1408,8 @@ def run_live_adjudication(input_csv, output_path, port):
     with socketserver.ThreadingTCPServer(("127.0.0.1", port), Handler) as httpd:
         url = f"http://127.0.0.1:{port}/"
         print(f"Live adjudication running at {url}")
+        print(f"  R1 = {sources['r1'] or '(source file not recorded)'}")
+        print(f"  R2 = {sources['r2'] or '(source file not recorded)'}")
         print(f"{n_pages} conflict page(s) to review.")
         print(f"Adjudicated CSV is saved to '{output_path}' on each submitted change.")
         print("Press Ctrl+C to stop.")
@@ -1453,7 +1492,7 @@ def main():
         output = args.output
         if output == "comparison.html":
             output = "combined.csv"
-        combine_csvs(all_rows[0], all_rows[1], args.use_keys, output)
+        combine_csvs(all_rows[0], all_rows[1], args.use_keys, output, files[0], files[1])
         return
 
     # Validate that all files have the same quotes/keys

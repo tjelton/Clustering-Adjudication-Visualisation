@@ -75,6 +75,10 @@ controls and page navigation lock — until you press **Submit change** (saves t
 or **Discard change** (reverts). Press **Cmd/Ctrl+Z** to undo the last saved change
 (or discard a pending table edit). Move between pages with **Prev/Next**.
 
+The **top-right corner** shows the adjusted Rand index (ARI) between R1 and R2 across all
+sentences: the **Original ARI** (the annotations as combined) above the **Current ARI**
+(the labels as they stand now), which updates after every change.
+
 The output is a single adjudicated CSV (`Sentence, R1, R2, R1_Original, R2_Original,
 R1_File, R2_File`) written on every change, so nothing is lost if the browser closes. **Save CSV** (in the
 toolbar) downloads a copy of the current adjudicated file. To pick up where you left
@@ -86,8 +90,8 @@ this replaces the current session, its undo history, and the adjudicated CSV on 
 
 - Python 3.7+
 - [seaborn](https://seaborn.pydata.org/) (`pip install seaborn`) — only required for
-  generating the static HTML comparisons. `--combine` and `--live-adjudication` use only
-  the standard library.
+  generating the static HTML comparisons. `--combine`, `--live-adjudication` and `--ari`
+  use only the standard library.
 
 ## CSV Format
 
@@ -120,6 +124,7 @@ python clustering_comparison.py <file1.csv> <file2.csv> [file3.csv] [options]
 | `--combine` | Combine two annotation CSVs into a single adjudication CSV (`Sentence, Annotator_1_Code, Annotator_2_Code, Annotator_1_File, Annotator_2_File`) written to `--output`. The `*_File` columns record each source file's name so live adjudication can show which is R1 and which is R2. Requires exactly 2 files. |
 | `--live-adjudication` | Launch the interactive two-annotator adjudication GUI. Takes a single combined CSV (from `--combine`) or a previously adjudicated CSV to resume; writes the adjudicated CSV to `--output` (when resuming without `-o`, saves back to the input file). |
 | `--port` | Port for the `--live-adjudication` local server (default: `8000`). |
+| `--ari` | Print the adjusted Rand index (ARI) and exit. With 2 or 3 annotation CSVs, reports every pair; with a single combined or adjudicated CSV, reports the original and current R1 vs R2 ARI. Honours `--use-keys`. |
 
 ### Examples
 
@@ -164,6 +169,21 @@ If `-o` is omitted, `--combine` defaults to `combined.csv` and `--live-adjudicat
 defaults to `adjudicated.csv` — unless the input is itself an adjudicated file, in
 which case changes are saved back to that file. Press `Ctrl+C` in the terminal to stop
 the server.
+
+### Adjusted Rand index
+
+`--ari` prints the adjusted Rand index between annotators and exits:
+
+```bash
+# Two or three annotation CSVs: one line per pair
+python clustering_comparison.py file1.csv file2.csv --ari
+
+# A combined or adjudicated CSV: original and current R1 vs R2
+python clustering_comparison.py adjudicated.csv --ari
+```
+
+The ARI is 1 for identical clusterings and about 0 for chance agreement. It matches
+scikit-learn's `adjusted_rand_score`, including returning 1 when it is undefined.
 
 ### Checking compatibility
 

@@ -75,6 +75,13 @@ def parse_args():
         default=8000,
         help="Port for the --live-adjudication local server (default: 8000)",
     )
+    parser.add_argument(
+        "--ari",
+        action="store_true",
+        help="Print the adjusted Rand index (ARI) and exit. With 2 or 3 annotation "
+        "CSVs, reports every pair; with a single combined or adjudicated CSV, "
+        "reports the original and current R1 vs R2 ARI.",
+    )
     return parser.parse_args()
 
 
@@ -630,6 +637,74 @@ def check_compatibility(files, all_rows, use_keys):
 
 
 # ---------------------------------------------------------------------------
+# Adjusted Rand index
+# ---------------------------------------------------------------------------
+
+def adjusted_rand_index(labels_a, labels_b):
+    """Adjusted Rand index between two equal-length label sequences.
+
+    Uses the pair-counting form (Hubert & Arabie, 1985). Returns 1.0 when the
+    index is undefined (fewer than two items, or both clusterings trivial),
+    matching scikit-learn's adjusted_rand_score.
+    """
+    n = len(labels_a)
+    if n < 2:
+        return 1.0
+
+    def pairs(counts):
+        return sum(c * (c - 1) // 2 for c in counts.values())
+
+    index = pairs(Counter(zip(labels_a, labels_b)))
+    sum_a, sum_b = pairs(Counter(labels_a)), pairs(Counter(labels_b))
+    expected = sum_a * sum_b / (n * (n - 1) // 2)
+    maximum = (sum_a + sum_b) / 2
+    if maximum == expected:
+        return 1.0
+    return (index - expected) / (maximum - expected)
+
+
+def report_ari(files, use_keys):
+    """Print the ARI for each pair of annotation CSVs, or the original and
+    current R1 vs R2 ARI for a single combined/adjudicated CSV."""
+    if len(files) == 1:
+        records, sources = read_combined_csv(files[0])
+        r1 = sources["r1"] or "R1"
+        r2 = sources["r2"] or "R2"
+        original = adjusted_rand_index(
+            [r["r1_original"] for r in records], [r["r2_original"] for r in records]
+        )
+        current = adjusted_rand_index(
+            [r["r1"] for r in records], [r["r2"] for r in records]
+        )
+        print("Adjusted Rand index (ARI)")
+        print(f"  {files[0]}: {r1} vs {r2} ({len(records)} sentences)")
+        print(f"    Original: {original:.4f}")
+        print(f"    Current:  {current:.4f}")
+        return
+
+    if len(files) not in (2, 3):
+        print("Error: --ari takes 1 combined CSV or 2-3 annotation CSVs.", file=sys.stderr)
+        sys.exit(1)
+
+    all_rows = [read_csv(f) for f in files]
+    for rows, filepath in zip(all_rows, files):
+        validate_columns(rows, filepath)
+    for i in range(1, len(files)):
+        validate_matching_pair(all_rows[0], all_rows[i], files[0], files[i], use_keys)
+
+    lookups = [build_lookup_map(rows, use_keys) for rows in all_rows]
+    keys = list(lookups[0])
+    print("Adjusted Rand index (ARI)")
+    for i in range(len(files)):
+        for j in range(i + 1, len(files)):
+            score = adjusted_rand_index(
+                [lookups[i][k] for k in keys], [lookups[j][k] for k in keys]
+            )
+            print(f"  {files[i]} vs {files[j]}: {score:.4f}")
+    print(f"  ({len(keys)} sentences)")
+
+
+# ---------------------------------------------------------------------------
 # Live adjudication GUI (two annotators)
 # ---------------------------------------------------------------------------
 
@@ -641,9 +716,15 @@ _ADJUDICATION_TEMPLATE = r"""<!DOCTYPE html>
 <style>
   body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
          margin: 0; padding: 0 0 40px 0; color: #222; }
-  h1 { font-size: 20px; padding: 16px 20px 0 20px; margin: 0; }
-  .explainer { padding: 6px 20px 0 20px; color: #555; font-size: 13px; max-width: 1100px; }
-  .sources { padding: 8px 20px 0 20px; font-size: 14px; }
+  h1 { font-size: 20px; padding: 16px 200px 0 20px; margin: 0; }
+  .explainer { padding: 6px 200px 0 20px; color: #555; font-size: 13px; max-width: 1100px; }
+  .sources { padding: 8px 200px 0 20px; font-size: 14px; }
+  .ari-box { position: absolute; top: 6px; right: 14px; z-index: 60; background: #fff;
+             border: 1px solid #ccc; border-radius: 6px; padding: 4px 10px;
+             font-size: 13px; line-height: 1.35; box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
+  .ari-row { display: flex; justify-content: space-between; gap: 14px; }
+  .ari-row.ari-orig { color: #666; }
+  .ari-val { font-variant-numeric: tabular-nums; font-weight: 600; }
   .sources code { background: #f0f0f0; padding: 1px 6px; border-radius: 4px; }
   .col-file { font-weight: 400; color: #666; font-size: 12px; }
   .toolbar { position: sticky; top: 0; background: #fff; z-index: 50;
@@ -705,6 +786,8 @@ _ADJUDICATION_TEMPLATE = r"""<!DOCTYPE html>
 </style>
 </head>
 <body>
+<div class="ari-box" id="ari-box"
+     title="Adjusted Rand index between R1 and R2 across all sentences"></div>
 <h1>Live Adjudication — Researcher 1 (R1) vs Researcher 2 (R2)</h1>
 <div class="sources" id="sources"></div>
 <p class="explainer">
@@ -717,6 +800,8 @@ _ADJUDICATION_TEMPLATE = r"""<!DOCTYPE html>
   applied and saved to disk immediately. Edits made directly in the R1/R2 table cells stay
   pending until you <b>Submit</b> (which saves to disk) or <b>Discard</b>.
   Press <b>Cmd/Ctrl+Z</b> to undo the last saved change (or discard a pending edit).
+  The top-right corner shows the adjusted Rand index (ARI) between R1 and R2 across all
+  sentences: the <b>original</b> annotations, and the <b>current</b> labels.
 </p>
 <div class="toolbar">
   <button id="prev-btn" onclick="prevPage()">&larr; Prev</button>
@@ -806,7 +891,29 @@ function pageColours(recs, counts) {
 }
 function pageRecords() { return draft.filter(r => r.page === currentPage); }
 
-function render() { renderNav(); renderViz(); renderTable(); renderDirty(); }
+// Adjusted Rand index (pair-counting form); 1 when undefined, as in scikit-learn.
+function adjustedRandIndex(a, b) {
+  const n = a.length;
+  if (n < 2) return 1;
+  const pairs = counts => { let s = 0; for (const c of counts.values()) s += c * (c - 1) / 2; return s; };
+  const tally = keys => { const m = new Map(); for (const k of keys) m.set(k, (m.get(k) || 0) + 1); return m; };
+  const index = pairs(tally(a.map((x, i) => JSON.stringify([x, b[i]]))));
+  const sumA = pairs(tally(a)), sumB = pairs(tally(b));
+  const expected = sumA * sumB / (n * (n - 1) / 2);
+  const maximum = (sumA + sumB) / 2;
+  return maximum === expected ? 1 : (index - expected) / (maximum - expected);
+}
+const ORIGINAL_ARI = adjustedRandIndex(INITIAL.records.map(r => r.r1_original),
+                                       INITIAL.records.map(r => r.r2_original));
+function renderAri() {
+  const current = adjustedRandIndex(draft.map(r => r.r1), draft.map(r => r.r2));
+  const row = (cls, label, v) => '<div class="ari-row ' + cls + '"><span>' + label
+      + '</span><span class="ari-val">' + v.toFixed(4) + '</span></div>';
+  document.getElementById('ari-box').innerHTML =
+      row('ari-orig', 'Original ARI', ORIGINAL_ARI) + row('ari-cur', 'Current ARI', current);
+}
+
+function render() { renderNav(); renderViz(); renderTable(); renderDirty(); renderAri(); }
 
 function renderNav() {
   document.getElementById('page-label').textContent =
@@ -1523,6 +1630,10 @@ def run_live_adjudication(input_csv, output_path, port):
 
 def main():
     args = parse_args()
+
+    if args.ari:
+        report_ari(args.files, args.use_keys)
+        return
 
     # --- Live adjudication: takes a single combined CSV ---
     if args.live_adjudication:

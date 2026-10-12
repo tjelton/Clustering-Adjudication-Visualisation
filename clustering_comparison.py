@@ -668,6 +668,14 @@ _ADJUDICATION_TEMPLATE = r"""<!DOCTYPE html>
   .viz-row [data-role] { cursor: context-menu; }
   .viz-row .col-r1 em, .viz-row .col-r2 em { font-style: normal; }
   hr.grp-sep { border: none; border-top: 1px solid #000; margin: 10px 0; }
+  .viz-row .col-r1[data-role] { cursor: pointer; }
+  .r1-group { border-radius: 4px; }
+  #viz.moving .r1-group:not(.move-src-group) { cursor: copy; }
+  #viz.moving .r1-group:not(.move-src-group):hover { background: #e8f0fe;
+        outline: 2px dashed #4a90d9; outline-offset: 2px; }
+  .viz-row.move-src { background: #fff3c4; }
+  .move-hint { display: none; margin: 0 20px 6px 20px; padding: 6px 10px; font-size: 13px;
+               background: #e8f0fe; border: 1px solid #9dbbef; border-radius: 5px; color: #1a3e7a; }
   .table-wrap { padding: 0 20px; overflow-x: auto; }
   table.adj-table { border-collapse: collapse; width: 100%; font-size: 13px; }
   table.adj-table th, table.adj-table td { border: 1px solid #ccc; padding: 5px 8px;
@@ -702,7 +710,8 @@ _ADJUDICATION_TEMPLATE = r"""<!DOCTYPE html>
   Sentences are grouped by <b>R1</b> (left); rows are coloured by <b>R2</b> (right).
   Singleton R2 clusters are shown in black and wrapped in [ brackets ]. An
   <u>underlined</u> R2 name means that cluster spans more than one R1 group on this page.
-  <b>Right-click</b> an R1 name, R2 name, or a sentence to adjudicate — these changes are
+  <b>Click</b> an R1 name, then click inside another R1 group to move that sentence there.
+  <b>Right-click</b> an R1 name, R2 name, or a sentence for more options. These changes are
   applied and saved to disk immediately. Edits made directly in the R1/R2 table cells stay
   pending until you <b>Submit</b> (which saves to disk) or <b>Discard</b>.
   Press <b>Cmd/Ctrl+Z</b> to undo the last saved change (or discard a pending edit).
@@ -719,6 +728,7 @@ _ADJUDICATION_TEMPLATE = r"""<!DOCTYPE html>
 <div class="banner" id="banner">Pending change — Submit or Discard to continue.</div>
 
 <div class="section-title">Cluster view</div>
+<div class="move-hint" id="move-hint"></div>
 <div id="viz"></div>
 
 <div class="section-title">Table view (editable: R1, R2)</div>
@@ -738,6 +748,8 @@ let committed = INITIAL.records.map(r => ({...r}));
 let draft = clone(committed);
 let dirty = false;
 let currentPage = 0;
+let movingId = null;  // id of the sentence picked up by clicking its R1 name
+let vizGroups = [];   // R1 labels of the groups rendered on the current page
 
 function clone(arr) { return arr.map(r => ({...r})); }
 function esc(s) { return (s == null ? '' : String(s))
@@ -817,8 +829,12 @@ function renderViz() {
   let html = '<div class="viz-header"><div class="col-r1">R1' + fileTag('r1') + '</div>'
       + '<div class="col-sent">Sentence</div><div class="col-r2">R2' + fileTag('r2') + '</div></div>';
 
+  const moving = movingId === null ? null : draft.find(r => r.id === movingId);
+  vizGroups = r1keys;
   r1keys.forEach((r1, gi) => {
     if (gi > 0) html += '<hr class="grp-sep">';
+    const src = moving && moving.r1 === r1 ? ' move-src-group' : '';
+    html += '<div class="r1-group' + src + '" data-gi="' + gi + '">';
     const rows = groups[r1].slice().sort((a, b) => cmpStr(a.sentence, b.sentence));
     for (const r of rows) {
       const col = colours[r.r2] ?? null;
@@ -826,15 +842,28 @@ function renderViz() {
       const single = col === null;
       const sent = single ? '[ ' + esc(r.sentence) + ' ]' : esc(r.sentence);
       const under = (r2r1[r.r2] && r2r1[r.r2].size > 1) ? 'text-decoration:underline;' : '';
-      html += '<div class="viz-row" style="color:' + colour + ';">'
-        + '<div class="col-r1" data-role="r1" data-id="' + r.id + '">' + esc(r.r1) + '</div>'
+      const srcRow = moving && moving.id === r.id ? ' move-src' : '';
+      html += '<div class="viz-row' + srcRow + '" style="color:' + colour + ';">'
+        + '<div class="col-r1" data-role="r1" data-id="' + r.id + '" '
+        + 'title="Click to move this sentence to another R1 group; right-click for more">'
+        + esc(r.r1) + '</div>'
         + '<div class="col-sent" data-role="sent" data-id="' + r.id + '">' + sent + '</div>'
         + '<div class="col-r2" data-role="r2" data-id="' + r.id + '" style="' + under + '">'
         + esc(r.r2) + '</div>'
         + '</div>';
     }
+    html += '</div>';
   });
-  document.getElementById('viz').innerHTML = html;
+  const viz = document.getElementById('viz');
+  viz.innerHTML = html;
+  viz.classList.toggle('moving', !!moving);
+  const hint = document.getElementById('move-hint');
+  hint.style.display = moving ? 'block' : 'none';
+  if (moving) {
+    hint.innerHTML = 'Moving <b>' + esc(moving.sentence) + '</b> (R1: ' + esc(moving.r1)
+      + ') &mdash; click inside another R1 group to move it there. '
+      + 'Click its own group, outside the groups, or press <b>Esc</b> to cancel.';
+  }
 }
 
 function renderTable() {
@@ -882,8 +911,48 @@ function renderDirty() {
 
 function markDirty() { dirty = true; }
 
-function prevPage() { if (!dirty && currentPage > 0) { currentPage--; render(); } }
-function nextPage() { if (!dirty && currentPage < N_PAGES - 1) { currentPage++; render(); } }
+function prevPage() {
+  if (!dirty && currentPage > 0) { movingId = null; currentPage--; render(); }
+}
+function nextPage() {
+  if (!dirty && currentPage < N_PAGES - 1) { movingId = null; currentPage++; render(); }
+}
+
+// ---- Click-to-move (R1) ----
+// Click an R1 name to pick the sentence up, then click anywhere inside another
+// R1 group on the page to move it into that cluster.
+function cancelMove() {
+  if (movingId === null) return;
+  movingId = null;
+  render();
+}
+document.getElementById('viz').addEventListener('click', e => {
+  if (e.button !== 0) return;
+  const nameEl = e.target.closest('.col-r1[data-role="r1"]');
+  if (movingId === null) {
+    if (!nameEl) return;
+    if (dirty) { toast('Submit or discard the pending change first.'); return; }
+    movingId = +nameEl.dataset.id;
+    render();
+    return;
+  }
+  const rec = draft.find(r => r.id === movingId);
+  const groupEl = e.target.closest('.r1-group');
+  const target = groupEl ? vizGroups[+groupEl.dataset.gi] : null;
+  movingId = null;
+  if (!rec || target == null || target === rec.r1) { render(); return; }
+  rec.r1 = target;
+  applyDirect();
+});
+document.addEventListener('click', e => {
+  // Clicks outside the cluster view cancel a pending move. Use the dispatch path:
+  // the viz handler re-renders, so e.target may already be detached here.
+  const viz = document.getElementById('viz');
+  if (movingId !== null && !e.composedPath().includes(viz)) cancelMove();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') cancelMove();
+});
 
 // ---- Reassignment shortlist algorithms ----
 function reassignR2Options(rec) {
@@ -951,6 +1020,7 @@ document.addEventListener('contextmenu', function(e) {
   if (!el) return;
   e.preventDefault();
   if (dirty) { toast('Submit or discard the pending change first.'); return; }
+  if (movingId !== null) cancelMove();
   openMenu(e.pageX, e.pageY, el.dataset.role, +el.dataset.id);
 });
 document.addEventListener('click', closeMenu);
@@ -1093,6 +1163,7 @@ function pushUndo() {
   if (undoStack.length > 200) undoStack.shift();
 }
 function undo() {
+  movingId = null;
   if (dirty) { discardChange(); return; }
   if (!undoStack.length) { toast('Nothing to undo.'); return; }
   const snap = undoStack.pop();

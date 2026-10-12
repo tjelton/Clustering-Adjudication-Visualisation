@@ -48,6 +48,12 @@ just Python's standard library — then opens the GUI in your browser.
 - A **table** at the bottom (Sentence, R1, R2, R1_Original, R2_Original) mirrors the
   current page, sorted by R1 then Sentence.
 
+**Click-to-move (R1):** left-click a sentence's **R1** name to pick it up (its row is
+highlighted), then click anywhere inside another R1 group on the page to move the sentence
+into that cluster. Clicking its own group, clicking outside the groups, or pressing **Esc**
+cancels. The move is applied and saved immediately, and **Cmd/Ctrl+Z** undoes it. To move a
+sentence to an R1 cluster that isn't on the current page, use *Reassign R1* below.
+
 **Adjudication controls** (right-click):
 
 | Right-click on | Menu option | Effect |

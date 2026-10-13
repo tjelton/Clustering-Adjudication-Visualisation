@@ -65,6 +65,7 @@ immediately and undoable with **Cmd/Ctrl+Z**; use *Reassign R2* for clusters on 
 |---|---|---|
 | An **R1 or R2** name | *Reassign R1 / Reassign R2* | Opens an adjacent submenu listing the clusters the sentence can move to — the most relevant first (those sharing the sentence's R1 group, then those co-occurring with the current cluster elsewhere), a divider, then all remaining clusters alphabetically. |
 | An **R1 or R2** name | *Make New R1/R2 Cluster Name…* | Type a brand-new cluster name and move just that sentence into it (rejected if the name already exists — use *Reassign* for that). |
+| An **R1 or R2** name | *Add Singleton…* | Move just that sentence into a new singleton R1/R2 cluster. The name box is pre-filled with a fresh `Singleton_NN` name that has not been used at any point in the session (as a current, original, renamed-away or undone label); edit it or accept it. Rejected if the name already exists. |
 | An **R1 or R2** name | *Rename All…* | Rename every instance of that cluster name at once. |
 | An **R1 or R2** name | *Reset to Original* | Revert that sentence's R1/R2 back to the original annotation (`R1_Original`/`R2_Original`). |
 | A **sentence** | *Make new Cluster* | Move the sentence into a brand-new cluster created directly beneath the current one (`New - ` is prepended to both its R1 and R2 names until unique). |
@@ -74,6 +75,13 @@ the table can also be edited directly; those edits stay **pending** — the righ
 controls and page navigation lock — until you press **Submit change** (saves to disk)
 or **Discard change** (reverts). Press **Cmd/Ctrl+Z** to undo the last saved change
 (or discard a pending table edit). Move between pages with **Prev/Next**.
+
+**See all clusters** (in the toolbar) shows the full clustering using the same
+two-annotator visualisation as comparing two CSVs (grouped by R1, coloured by R2, with
+**Swap Researchers**). It covers every sentence, including ones the annotators already
+agree on, and uses the current saved labels. **← Back to adjudication** (or Esc, or the
+browser's back button) returns you to exactly where you were — same page, scroll
+position and undo history.
 
 The **top-right corner** shows the adjusted Rand index (ARI) between R1 and R2 across all
 sentences: the **Original ARI** (the annotations as combined) above the **Current ARI**
@@ -89,9 +97,10 @@ this replaces the current session, its undo history, and the adjudicated CSV on 
 ## Requirements
 
 - Python 3.7+
-- [seaborn](https://seaborn.pydata.org/) (`pip install seaborn`) — only required for
-  generating the static HTML comparisons. `--combine`, `--live-adjudication` and `--ari`
-  use only the standard library.
+- [seaborn](https://seaborn.pydata.org/) (`pip install seaborn`) — optional. If it is
+  installed, cluster colours in the HTML comparisons (and the live adjudication's **See
+  all clusters** view) use its `husl` palette; otherwise an equivalent built-in palette is
+  used. Everything else uses only the standard library.
 
 ## CSV Format
 

@@ -229,13 +229,25 @@ def combine_csvs(rows_a, rows_b, use_keys, output_path, file_a, file_b):
 # Colour maps
 # ---------------------------------------------------------------------------
 
+def distinct_colours(n):
+    """n evenly spaced hues: seaborn's husl palette if installed, otherwise an
+    equivalent HLS palette from the standard library."""
+    try:
+        import seaborn as sns
+    except ImportError:
+        import colorsys
+        return [
+            "#%02x%02x%02x" % tuple(round(c * 255) for c in colorsys.hls_to_rgb(i / n, 0.4, 0.75))
+            for i in range(n)
+        ]
+    return sns.color_palette("husl", n).as_hex()
+
+
 def build_colour_map(rows):
     """Colour map for a file's clusters. Singletons get None (rendered black)."""
-    import seaborn as sns
-
     counts = Counter(row["Code_Name"] for row in rows)
     multi = [name for name, c in counts.items() if c > 1]
-    palette = sns.color_palette("husl", len(multi)).as_hex()
+    palette = distinct_colours(len(multi))
     random.shuffle(palette)
     colour_map = {name: palette[i] for i, name in enumerate(multi)}
     for name, c in counts.items():
@@ -307,6 +319,15 @@ def render_two_view_html(left_parts, right_parts, base_label, other_label):
 
 def generate_html_two(all_rows, all_lookups, all_cmaps, use_keys, output_path, labels):
     """Write a two-annotator comparison HTML with a swap button."""
+    html = two_view_html(all_rows, all_lookups, all_cmaps, use_keys, output_path, labels)
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(html)
+
+
+def two_view_html(all_rows, all_lookups, all_cmaps, use_keys, title, labels):
+    """Return a two-annotator comparison HTML page with a swap button."""
+    import io
+
     rows1, rows2 = all_rows
     lookup1, lookup2 = all_lookups   # lookup_i: key -> Code_Name for annotator i
     cmap1, cmap2 = all_cmaps
@@ -318,14 +339,15 @@ def generate_html_two(all_rows, all_lookups, all_cmaps, use_keys, output_path, l
     view_a = render_two_view_html(left_a, right_a, label1, label2)
     view_b = render_two_view_html(left_b, right_b, label2, label1)
 
-    with open(output_path, "w", encoding="utf-8") as f:
-        _write_html_head(f, output_path, three=False)
-        _write_explainer(f, n=2)
-        f.write('<button id="cycle-btn" onclick="cycleView()">Swap Researchers</button>\n')
-        f.write(f'<div id="view-0">{view_a}</div>\n')
-        f.write(f'<div id="view-1" style="display:none;">{view_b}</div>\n')
-        f.write(_cycle_script(2))
-        f.write("</body>\n</html>\n")
+    f = io.StringIO()
+    _write_html_head(f, title, three=False)
+    _write_explainer(f, n=2)
+    f.write('<button id="cycle-btn" onclick="cycleView()">Swap Researchers</button>\n')
+    f.write(f'<div id="view-0">{view_a}</div>\n')
+    f.write(f'<div id="view-1" style="display:none;">{view_b}</div>\n')
+    f.write(_cycle_script(2))
+    f.write("</body>\n</html>\n")
+    return f.getvalue()
 
 
 # ---------------------------------------------------------------------------
@@ -783,6 +805,13 @@ _ADJUDICATION_TEMPLATE = r"""<!DOCTYPE html>
            background: #333; color: #fff; padding: 8px 16px; border-radius: 6px;
            font-size: 13px; opacity: 0; transition: opacity 0.25s; pointer-events: none; }
   #toast.show { opacity: 0.95; }
+  body.show-all > :not(#all-view):not(#toast) { display: none !important; }
+  #all-view { display: none; position: fixed; inset: 0; z-index: 100; background: #fff;
+              flex-direction: column; }
+  body.show-all #all-view { display: flex; }
+  .all-bar { padding: 10px 20px; border-bottom: 1px solid #ddd; display: flex;
+             align-items: center; gap: 12px; }
+  #all-frame { flex: 1; width: 100%; border: 0; }
 </style>
 </head>
 <body>
@@ -800,6 +829,8 @@ _ADJUDICATION_TEMPLATE = r"""<!DOCTYPE html>
   applied and saved to disk immediately. Edits made directly in the R1/R2 table cells stay
   pending until you <b>Submit</b> (which saves to disk) or <b>Discard</b>.
   Press <b>Cmd/Ctrl+Z</b> to undo the last saved change (or discard a pending edit).
+  <b>See all clusters</b> shows the full clustering visualisation (every sentence, current
+  saved labels); <b>Back</b> (or Esc, or the browser's back button) returns you here.
   The top-right corner shows the adjusted Rand index (ARI) between R1 and R2 across all
   sentences: the <b>original</b> annotations, and the <b>current</b> labels.
 </p>
@@ -808,6 +839,7 @@ _ADJUDICATION_TEMPLATE = r"""<!DOCTYPE html>
   <span id="page-label"></span>
   <button id="next-btn" onclick="nextPage()">Next &rarr;</button>
   <span class="spacer"></span>
+  <button id="all-clusters-btn" onclick="seeAllClusters()">See all clusters</button>
   <button id="save-csv-btn" onclick="saveCsv()">Save CSV</button>
   <button id="load-csv-btn" onclick="loadCsvClick()">Load CSV&hellip;</button>
   <input type="file" id="csv-file" accept=".csv,text/csv" style="display:none">
@@ -822,6 +854,14 @@ _ADJUDICATION_TEMPLATE = r"""<!DOCTYPE html>
 <div class="table-actions">
   <button id="submit-btn" onclick="submitChange()">Submit change</button>
   <button id="discard-btn" onclick="discardChange()">Discard change</button>
+</div>
+
+<div id="all-view">
+  <div class="all-bar">
+    <button onclick="history.back()">&larr; Back to adjudication</button>
+    <span>Full clustering — current saved labels for every sentence</span>
+  </div>
+  <iframe id="all-frame" title="All clusters"></iframe>
 </div>
 
 <div id="toast"></div>
@@ -913,7 +953,28 @@ function renderAri() {
       row('ari-orig', 'Original ARI', ORIGINAL_ARI) + row('ari-cur', 'Current ARI', current);
 }
 
-function render() { renderNav(); renderViz(); renderTable(); renderDirty(); renderAri(); }
+// Every cluster name seen this session (R1 or R2, current or original), so a
+// suggested new name is never one that has been used before -- even if it was
+// later renamed away or undone.
+const usedNames = new Set();
+function noteUsedNames() {
+  for (const r of draft) {
+    usedNames.add(r.r1); usedNames.add(r.r2);
+    usedNames.add(r.r1_original); usedNames.add(r.r2_original);
+  }
+}
+function freshSingletonName() {
+  noteUsedNames();
+  for (let i = 1; ; i++) {
+    const name = 'Singleton_' + String(i).padStart(2, '0');
+    if (!usedNames.has(name)) return name;
+  }
+}
+
+function render() {
+  noteUsedNames();
+  renderNav(); renderViz(); renderTable(); renderDirty(); renderAri();
+}
 
 function renderNav() {
   document.getElementById('page-label').textContent =
@@ -1071,7 +1132,8 @@ document.addEventListener('click', e => {
   if (movingId !== null && !e.composedPath().includes(viz)) cancelMove();
 });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') cancelMove();
+  if (e.key !== 'Escape') return;
+  if (document.body.classList.contains('show-all')) backOnEscape(e); else cancelMove();
 });
 
 // ---- Reassignment shortlist algorithms ----
@@ -1117,6 +1179,20 @@ function renameAll(field, oldName) {
   const v = nn.trim();
   if (!v || v === oldName) return;
   for (const r of draft) if (r[field] === oldName) r[field] = v;
+  applyDirect();
+}
+function addSingleton(field, rec) {
+  const label = field === 'r1' ? 'R1' : 'R2';
+  const nn = prompt('Move this sentence into a new ' + label + ' singleton cluster called:',
+                    freshSingletonName());
+  if (nn === null) return;
+  const v = nn.trim();
+  if (!v) return;
+  if ((field === 'r1' ? allR1() : allR2()).includes(v)) {
+    toast('An ' + label + ' cluster called "' + v + '" already exists — use Reassign instead.');
+    return;
+  }
+  rec[field] = v;
   applyDirect();
 }
 function makeNewName(field, rec) {
@@ -1226,6 +1302,7 @@ function openMenu(x, y, role, id) {
     addSubmenuItem('Reassign R2', reassignR2Options(rec),
                    l => { rec.r2 = l; applyDirect(); });
     addItem('Make New R2 Cluster Name…', () => makeNewName('r2', rec), 'ctx-action');
+    addItem('Add Singleton…', () => addSingleton('r2', rec), 'ctx-action');
     addItem('Rename All…', () => renameAll('r2', rec.r2), 'ctx-action');
     addItem('Reset to Original', () => { rec.r2 = rec.r2_original; applyDirect(); },
             'ctx-action');
@@ -1233,6 +1310,7 @@ function openMenu(x, y, role, id) {
     addSubmenuItem('Reassign R1', reassignR1Options(rec),
                    l => { rec.r1 = l; applyDirect(); });
     addItem('Make New R1 Cluster Name…', () => makeNewName('r1', rec), 'ctx-action');
+    addItem('Add Singleton…', () => addSingleton('r1', rec), 'ctx-action');
     addItem('Rename All…', () => renameAll('r1', rec.r1), 'ctx-action');
     addItem('Reset to Original', () => { rec.r1 = rec.r1_original; applyDirect(); },
             'ctx-action');
@@ -1310,6 +1388,39 @@ function discardChange() {
   render();
   toast('Change discarded.');
 }
+
+// ---- Full clustering view ----
+// Shown in place over the adjudication view (which is only hidden, not
+// reloaded), so Back returns to the same page, scroll position and undo history.
+// A history entry is pushed so the browser's back button also returns.
+let allScrollY = 0;
+function seeAllClusters() {
+  if (dirty) { toast('Submit or discard the pending change first.'); return; }
+  history.pushState({ allClusters: true }, '');
+  showAllClusters();
+}
+function showAllClusters() {
+  if (document.body.classList.contains('show-all')) return;
+  closeMenu();
+  allScrollY = window.scrollY;
+  // replace() so reloading the frame never adds its own browser-history entry.
+  document.getElementById('all-frame').contentWindow.location.replace('/all-clusters?t=' + Date.now());
+  document.body.classList.add('show-all');
+}
+function hideAllClusters() {
+  if (!document.body.classList.contains('show-all')) return;
+  document.body.classList.remove('show-all');
+  window.scrollTo(0, allScrollY);
+}
+window.addEventListener('popstate', e => {
+  if (e.state && e.state.allClusters) showAllClusters(); else hideAllClusters();
+});
+function backOnEscape(e) {
+  if (e.key === 'Escape' && document.body.classList.contains('show-all')) history.back();
+}
+document.getElementById('all-frame').addEventListener('load', e => {
+  e.target.contentWindow.document.addEventListener('keydown', backOnEscape);
+});
 
 // ---- Save / load CSV ----
 function saveCsv() {
@@ -1515,6 +1626,25 @@ def _adjudication_html(records, n_pages, sources):
     )
 
 
+def all_clusters_html(records, sources):
+    """The two-annotator comparison page (as for two annotation CSVs) built from
+    the current R1/R2 labels of every record."""
+    import html
+
+    rows = [
+        [{"Code_Name": html.escape(r[role]), "Quote": html.escape(r["sentence"])} for r in records]
+        for role in ("r1", "r2")
+    ]
+    lookups = [build_lookup_map(rs, use_keys=False) for rs in rows]
+    cmaps = [build_colour_map(rs) for rs in rows]
+    labels = [
+        html.escape(f"{role} ({os.path.splitext(sources[role.lower()])[0]})"
+                    if sources[role.lower()] else role)
+        for role in ("R1", "R2")
+    ]
+    return two_view_html(rows, lookups, cmaps, False, "All clusters — R1 vs R2", labels)
+
+
 def run_live_adjudication(input_csv, output_path, port):
     import http.server
     import socketserver
@@ -1541,14 +1671,22 @@ def run_live_adjudication(input_csv, output_path, port):
             pass
 
         def do_GET(self):
-            if self.path in ("/", "/index.html"):
+            path = self.path.split("?", 1)[0]
+            if path in ("/", "/index.html"):
                 body = html_bytes()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
-            elif self.path == "/adjudicated.csv":
+            elif path == "/all-clusters":
+                body = all_clusters_html(state["records"], state["sources"]).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            elif path == "/adjudicated.csv":
                 body = adjudication_csv_text(state["records"], state["sources"]).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/csv; charset=utf-8")
